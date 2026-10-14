@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * HinLink OPC-H88K V2 —— HinLink 适配 for immortalwrt
+ *
+ * 本文件基于 istoreos/istoreos 的 rk3588-h88k-v2.dts，
+ * 仅追加头部说明，未改动硬件配置。
+ *
+ * ★ 依赖：rk3588-hinlink.dtsi（iStoreOS 私有，immortalwrt 6.18 内核中没有）
+ *   必须一并移植，否则编译失败。来源：
+ *   https://github.com/istoreos/istoreos
+ *     target/linux/rockchip/dts/rk3588/rk3588-hinlink.dtsi
+ *   该dtsi 还需下列 iStoreOS 私有 dtsi（在同目录下）：
+ *     rk3588-hdmirx.dtsi  rk3588-ramoops.dtsi  rk3588-rk806-single.dtsi
+ *     rk3588s-ip.dtsi  rk3588s-ip-supply.dtsi
+ *     rk3588s-crypto.dtsi  rk3588s-gpu.dtsi  rk3588s-npu.dtsi  rk3588s-vpu.dtsi
+ *
+ * 硬件要点：
+ *   - combphy0_ps + sata0（SATA 存储） */
+/*
+ * Copyright (c) 2023 iStoreOS
+ * (https://www.istoreos.com)
+ *
+ * Copyright (c) 2022 Rockchip Electronics Co., Ltd.
+ *
+ */
+
+/dts-v1/;
+
+#include "rk3588-hinlink.dtsi"
+
+/ {
+	model = "HINLINK H88K V2";
+	compatible = "hinlink,h88k-v2", "rockchip,rk3588";
+
+	vcc3v3_m2_sata: vcc3v3-m2-sata {
+		compatible = "regulator-fixed";
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+		gpios = <&gpio4 RK_PA4 GPIO_ACTIVE_HIGH>;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-name = "vcc3v3_sata";
+		vin-supply = <&vcc12v_dcin>;
+	};
+};
+
+// combphy0_ps
+&sata0 {
+	status = "okay";
+};
