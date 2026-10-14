@@ -506,3 +506,47 @@ endef
 TARGET_DEVICES += hinlink_h29k-v5-1.49_rk3528
 
 # HT2：单网口，WiFi AIC8800，★ SDIO 最高速率 SDR50（H29K 是 SDR104）
+define Device/hinlink_opc-ht2_rk3528
+  $(Device/rk3528)
+  DEVICE_VENDOR := HINLINK
+  DEVICE_MODEL := OPC-HT2
+  DEVICE_DTS := rk3528-hinlink-ht2
+  # ★ u-boot：直接用**上游 OpenWrt 的 HINLINK 支持**（见 patches-uboot/）
+  #   上游 package/boot/uboot-rockchip/Makefile 已有本条目，defconfig 与
+  #   u-boot dts 由 patches-uboot/ 里那两个 patch 提供（源自 openwrt/main
+  #   patches/106、107）。u-boot 2026.07 的
+  #   dts/upstream/src/arm64/rockchip/ 里已自带 rk3568-hinlink-h68k.dts。
+  #   TPL/ATF 走通用 rk3568_ddr_1560MHz + bl31，不依赖具体板子。
+  #   BUILD_DEVICES 已在我们的 Makefile 补丁里登记本机型，
+  #   ⇒ make defconfig 会自动带上 CONFIG_PACKAGE_u-boot-hinlink-ht2-rk3528=y。
+  UBOOT_DEVICE_NAME := hinlink-ht2-rk3528
+  DEVICE_PACKAGES := kmod-aic8800-sdio kmod-r8169
+  # ★ 通用包集（LuCI + 全无线网卡驱动 + 风扇驱动）
+  $(Device/hinlink_common)
+endef
+TARGET_DEVICES += hinlink_opc-ht2_rk3528
+
+# ===== RK3588 机型 =====
+#
+# ---- H89K：从零移植 ----
+# 来源：厂商 immortalwrt v1.2.2 (2025-06-08) 固件内 dtb（88036 B）
+#   H89K 此前在所有 OpenWrt 衍生固件中零适配。
+#
+# 网络 = 1×GMAC(RGMII) + 2×RTL8125 2.5G = 3 口
+#   PCIe 网卡挂在 pcie2x1l1(fe180000) 与 pcie2x1l2(fe190000)，
+#   reset 脚分别是 GPIO2_A0 与 GPIO5_A0。
+#   厂商 02_network 原值：ucidef_set_interfaces_lan_wan "eth0 eth1" "eth2"
+#   ⇒ 板载 RGMII 作 WAN（GMAC 节点显式 label = "eth2"）
+#
+# ★ 不含 SATA —— 厂商 dtb 里 sata0/1/2 三路均为 disabled
+# ★ 不含板载 WiFi（用 M.2）
+#   5G 模组：4G/5G 供电 GPIO4_A3 + 复位 GPIO4_C6
+#   屏：ST7789V 135x240 rot90 @SPI4 m2（厂商 dtb + 上游 unifreq PR#19 双重实证）
+#     —— fbtft 的 fb_st7789v 驱动本 target 已**内建**
+#        （config-6.18 里 CONFIG_FB_TFT_ST7789V=y，见 armv8 的 config 追加段）；
+#     显示偏移由 patches/9999-fbtft-read-display-offset-from-dt.patch
+#     从 DT 读取（本 DTS 的 panel 节点已写 x-offset=40 / y-offset=52，
+#     值为 H29K 1.14" 同尺寸面板的偏移量，属推断，需实机确认）。
+#   5G 模组：双路 IO —— 供电 GPIO4_A3(5V) + 复位 GPIO4_C6(3.3V)
+#     ⚠️ 与 H29K 的模组 IO 完全不同，详见 docs/HARDWARE.md §四
+
