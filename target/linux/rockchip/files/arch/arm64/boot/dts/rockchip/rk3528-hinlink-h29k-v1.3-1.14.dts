@@ -1,0 +1,636 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * HinLink H29K —— v1.3 主板 + 1.14 寸屏（135x240 rot270）
+ *
+ * ★ 网络：**单网口** —— 只有板载 RGMII(gmac1)。
+ *   本 DTS 不含任何 PCIe 网卡节点，因此枚举结果只有 eth0。
+ *   厂商 DTS 与上游 unifreq rk3528-hlink-h29k.dts 同样是单口
+ *   （aliases 里只有 ethernet0 = &gmac1），两侧一致。
+ *   ⇒ board.d/02_network 对本机只映射 eth0，不设独立 WAN。
+ *
+ * ★ 屏幕尺寸只保留 1.14" 与 1.49" 两种；厂商的 1.9" / 2.8" 变体已移除。
+ */
+
+/dts-v1/;
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+
+#include "rk3528.dtsi"
+
+/ {
+	model = "HINLINK H29K v1.3 (1.14 inch)";
+	// 屏幕: 1.14" 135x240 rot270
+	// 屏幕: 1.14" 135x240
+	compatible = "hinlink,h29k-v1.3-114", "hinlink,h29k", "rockchip,rk3528";
+
+	aliases {
+		mmc0 = &sdhci;
+		mmc1 = &sdmmc;
+		mmc2 = &sdio0;
+		ethernet0 = &gmac1;
+
+		led-boot = &led_work;
+		led-failsafe = &led_work;
+		led-running = &led_work;
+		led-upgrade = &led_work;
+	};
+
+	chosen {
+		stdout-path = "serial0:1500000n8";
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+		pinctrl-0 = <&modem_4g_led>,<&modem_5g_led>, <&work_led_en>;
+
+		modem_4g: modem_4g {
+			label = "red:modem_4g";
+			gpios = <&gpio4 RK_PC0 GPIO_ACTIVE_LOW>;
+		};
+
+		modem_5g: modem_5g {
+			label = "blue:modem_5g";
+			gpios = <&gpio4 RK_PC3 GPIO_ACTIVE_LOW>;
+		};
+
+		led_work: work {
+			label = "green:work";
+			gpios = <&gpio4 RK_PB7 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+
+
+
+	/*
+	 * ============ 5G 模组：供电（regulator）+ 复位（rfkill-gpio）============
+	 *
+	 * 硬件（厂商 H29K 固件 dtb f3_318a000_40194.dtb，
+	 * model="HINLINK H29K Board"，逐字段实证）：
+	 *
+	 *     rfkill-modem {
+	 *         compatible = "rfkill-gpio";
+	 *         type = "wwan";
+	 *         reset-gpios = <&gpio4 RK_PB4 GPIO_ACTIVE_LOW>;   ← 复位
+	 *         power-gpios = <&gpio4 RK_PB5 GPIO_ACTIVE_LOW>;   ← 供电
+	 *     };
+	 *
+	 * 厂商这段**不能直接照抄**，两个坑：
+	 *   1) `power-gpios` 在 6.18 上**没有任何实现** ——
+	 *      net/rfkill/rfkill-gpio.c 只 request `reset` / `shutdown`。
+	 *      ⇒ 供电脚 GPIO4_B5 得另找主人，本文件交给 vcc3v3_modem regulator。
+	 *   2) 属性名变了：6.18 对 DT 节点读 `label` / `radio-type`，
+	 *      厂商写的 `name` / `type` 会被忽略（type 退化成 RFKILL_TYPE_ALL，
+	 *      按 type 就找不到设备）。
+	 *
+	 * 分工（详见 docs/HARDWARE.md §四、§4.9）：
+	 *   · `vcc3v3_modem`（regulator，GPIO4_B5）—— 供电，常开
+	 *   · `rfkill-modem`（rfkill-gpio，GPIO4_B4）—— 复位，**可软复位**
+	 *       用户态：echo 0 > /sys/class/rfkill/rfkillN/state   （拉复位）
+	 *               echo 1 > /sys/class/rfkill/rfkillN/state   （释放）
+	 *       已封装成 `/etc/init.d/hinlink-modem-hardreset reset`。
+	 *
+	 * ★★ 极性：只由 `enable-active-high` 决定，不能凭 GPIO_ACTIVE_LOW 猜 ★★
+	 *   6.18 的 drivers/gpio/gpiolib-of.c 里有一张极性映射表，注释原文：
+	 *     "The regulator GPIO handles are specified such that the presence
+	 *      or absence of enable-active-high solely controls the polarity of
+	 *      the GPIO line. Any phandle flags must be actively ignored."
+	 *   ⇒ 下面的 vcc3v3_modem **不写** enable-active-high = 低电平使能
+	 *     （与厂商 rfkill 段里 GPIO_ACTIVE_LOW 表达的意图一致）。
+	 *     写了 enable-active-high 会变成高电平使能，模组将无法上电。
+	 */
+	vcc3v3_modem: vcc3v3-modem {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_modem";
+		gpio = <&gpio4 RK_PB5 GPIO_ACTIVE_LOW>;   /* 仅语义标注，内核忽略 flag */
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		startup-delay-us = <5000>;                /* 电源稳定 5ms */
+		vin-supply = <&vcc5v0_sys>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&modem_power_en>;
+	};
+
+	/*
+	 * ============ 5G 模组复位 —— 交给 rfkill-gpio，换来「软复位」============
+	 *
+	 * 供电仍由上面的 vcc3v3_modem regulator 负责（内核保证上电）；
+	 * 复位脚 GPIO4_B4 交给 rfkill-gpio。
+	 *
+	 * ★ 为什么要交给 rfkill-gpio：regulator-fixed 和 rfkill-gpio 都会
+	 *   **占用**这个 GPIO（用户态 export 必 EBUSY），但 rfkill-gpio 在
+	 *   /sys/class/rfkill/ 下留了一个**可写**的 state 属性 ——
+	 *   6.18 net/rfkill/core.c: `static DEVICE_ATTR_RW(state)`，其
+	 *   state_store() 会调 rfkill_set_block() → rfkill_gpio_set_power()：
+	 *
+	 *       echo 0 > /sys/class/rfkill/rfkillN/state   → blocked=1
+	 *             → gpiod_set_value(reset_gpio, 0)     = 复位有效
+	 *       echo 1 > /sys/class/rfkill/rfkillN/state   → blocked=0
+	 *             → gpiod_set_value(reset_gpio, 1)     = 复位释放
+	 *
+	 *   ⇒ 0 → 等一会儿 → 1 就是一次完整的复位脉冲，而且**不需要装
+	 *     rfkill 命令**（纯 sysfs）。已封装成 /etc/init.d/hinlink-modem-hardreset reset。
+	 *
+	 * ⚠️ 属性名必须是 `label` + `radio-type`
+	 *   6.18 的 rfkill_gpio_probe() 对 DT 节点读的是：
+	 *       name_property = "label";   type_property = "radio-type";
+	 *   （只有非 DT 路径才读 "name" / "type"）。
+	 *   厂商 dtb 写的是 `type = "wwan"` —— 在老内核有效，在 6.18 **被忽略**，
+	 *   type 退化成 RFKILL_TYPE_ALL，按 type 查找就找不到设备了。
+	 *
+	 * ⚠️ 不要再写 `power-gpios` —— 6.18 的 rfkill-gpio 只 request
+	 *   `reset` / `shutdown`，`power` 无任何实现（见 docs/HARDWARE.md §4.4）。
+	 *
+	 * 极性：厂商 dtb 标 GPIO_ACTIVE_LOW。unblock 时 gpiod_set_value(1)
+	 *   → 物理**低** = 模组工作；block 时物理**高** = 复位。
+	 */
+	rfkill-modem {
+		compatible = "rfkill-gpio";
+		label = "rfkill-modem";
+		radio-type = "wwan";
+		reset-gpios = <&gpio4 RK_PB4 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&modem_reset_en>;
+	};
+
+
+	vcc5v0_sys: vcc5v0-sys {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_sys";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+	};
+	
+	vcc5v0_usb: vcc5v0-usb {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_usb";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_3v3: vcc-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_1v8: vcc-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_1v8";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc_3v3>;
+	};
+
+	vcc3v3_sd: vcc3v3-sd {
+		compatible = "regulator-fixed";
+		gpio = <&gpio4 RK_PA1 GPIO_ACTIVE_LOW>;
+		regulator-name = "vcc3v3_sd";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_3v3>;
+	};
+	
+	vcc_3v3_s3: vcc-3v3-s3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3_s3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_1v8_s3: vcc-1v8-s3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_1v8_s3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc_3v3>;
+	};
+
+	vcc_3v3_lcd: vcc-3v3-lcd {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3_lcd";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_3v3>;
+	};
+
+	vccio_sd: vccio-sd {
+		compatible = "regulator-gpio";
+		gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>;
+		regulator-name = "vccio_sd";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <3300000>;
+		states = <1800000 0x0>, <3300000 0x1>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_ddr: vcc-ddr {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_ddr";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vdd_0v9: vdd-0v9 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_0v9";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <900000>;
+		regulator-max-microvolt = <900000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vdd_arm: vdd-arm {
+		compatible = "pwm-regulator";
+		pwms = <&pwm1 0 5000 1>;
+		regulator-name = "vdd_arm";
+		regulator-min-microvolt = <746000>;
+		regulator-max-microvolt = <1201000>;
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-settling-time-up-us = <250>;
+		pwm-supply = <&vcc5v0_sys>;
+		/*
+		 * ★ 厂商 H29K dtb 未提供 ramp-delay，但不加会打
+		 *   `vdd_cpu: ramp_delay not set` 警告。
+		 *   本机与 H28K/HT2 是同一路 5kHz PWM 调压、
+		 *   电压范围逐字节相同（vdd_arm 746~1201000 /
+		 *   vdd_logic 705~1006000），故取厂商 H28K 的 6001。
+		 */
+		regulator-ramp-delay = <6001>;
+	};
+
+	vdd_logic: vdd-logic {
+		compatible = "pwm-regulator";
+		pwms = <&pwm2 0 5000 1>;
+		regulator-name = "vdd_logic";
+		regulator-min-microvolt = <705000>;
+		regulator-max-microvolt = <1006000>;
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-settling-time-up-us = <250>;
+		pwm-supply = <&vcc5v0_sys>;
+		/*
+		 * ★ 厂商 H29K dtb 未提供 ramp-delay，但不加会打
+		 *   `vdd_cpu: ramp_delay not set` 警告。
+		 *   本机与 H28K/HT2 是同一路 5kHz PWM 调压、
+		 *   电压范围逐字节相同（vdd_arm 746~1201000 /
+		 *   vdd_logic 705~1006000），故取厂商 H28K 的 6001。
+		 */
+		regulator-ramp-delay = <6001>;
+	};
+
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_enable_h>;
+		reset-gpios = <&gpio1 RK_PA6 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&combphy {
+	status = "okay";
+};
+
+&cpu0 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&cpu1 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&cpu2 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&cpu3 {
+	cpu-supply = <&vdd_arm>;
+};
+
+/*
+ * ★ 已注释：内核 6.18 的 rk3528.dtsi 里**没有 sfc 节点**
+ *   （实测 dtc 报 "Label or path sfc not found"）。
+ *   RK3528 是 Linux 6.14 才引入的，该 SoC 的 sfc 支持尚不完整。
+ *   保留原文以便内核补齐后直接恢复。
+ * &sfc {
+ * 	status = "okay";
+ * };
+ */
+
+&gmac1 {
+	clock_in_out = "output";
+	pinctrl-names = "default";
+	pinctrl-0 = <&rgmii_miim
+		     &rgmii_tx_bus2
+		     &rgmii_rx_bus2
+		     &rgmii_rgmii_clk
+		     &rgmii_rgmii_bus>;
+	phy-handle = <&rgmii_phy>;
+	phy-mode = "rgmii-id";
+	phy-supply = <&vcc_3v3>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	snps,reset-gpio = <&gpio4 RK_PC2 GPIO_ACTIVE_LOW>;
+	status = "okay";
+};
+
+&gpu {
+	mali-supply = <&vdd_logic>;
+	status = "okay";
+};
+
+&mdio1 {
+	rgmii_phy: phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+	};
+};
+
+&pinctrl {
+	leds {
+
+		work_led_en: led-work-en {
+			rockchip,pins = <4 RK_PB7 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		modem_4g_led: modem_4g_led{
+			rockchip,pins = <4 RK_PC0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		modem_5g_led: modem_5g_led{
+			rockchip,pins = <4 RK_PC3 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+	
+	wifi {
+		wifi_enable_h: wifi-enable-h {
+			rockchip,pins = <1 RK_PA6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		wifi_host_wake: wifi-host-wake {
+			rockchip,pins = <1 RK_PA7 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+	};
+
+	/* 5G 模组：供电 + 复位（GPIO4_B5 / GPIO4_B4，厂商 dtb 实证） */
+	modem {
+		modem_power_en: modem-power-en {
+			rockchip,pins = <4 RK_PB5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		modem_reset_en: modem-reset-en {
+			rockchip,pins = <4 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	bluetooth {
+		bt_enable_h: bt-enable-h {
+			rockchip,pins = <1 RK_PC1 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+
+		uart2m1_gpios: uart2m1-gpios {
+			rockchip,pins = <1 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	lcd {
+		lcd_dc_pin: lcd-dc-pin {
+			rockchip,pins = <1 RK_PB4 RK_FUNC_GPIO &pcfg_pull_up_drv_level_6>;
+		};
+		
+		spi1_custom_pins: spi4-custom-pins {
+			rockchip,pins =
+				/* spi1_clk_m2 */
+				<1 RK_PB6 2 &pcfg_pull_none_drv_level_2>,
+				/* spi1_mosi_m2 */
+				<1 RK_PB7 2 &pcfg_pull_none_drv_level_2>;
+		};
+
+		lcd_backlight_pin: lcd-backlight-pin {
+            rockchip,pins = <0 RK_PA0 RK_FUNC_GPIO &pcfg_pull_up>;  // 背光引脚
+        };
+	};
+    
+};
+
+
+&pwm1 {
+	status = "okay";
+};
+
+&pwm2 {
+	status = "okay";
+};
+
+&rng {
+	status = "okay";
+};
+
+&sdhci {
+	bus-width = <8>;
+	mmc-hs200-1_8v;
+	max-frequency = <200000000>;
+	non-removable;
+	pinctrl-names = "default";
+	pinctrl-0 = <&emmc_bus8 &emmc_clk &emmc_cmd &emmc_strb>;
+	vmmc-supply = <&vcc_3v3>;
+	vqmmc-supply = <&vcc_1v8>;
+	status = "okay";
+};
+
+
+&sdmmc {
+	bus-width = <4>;
+	cap-sd-highspeed;
+	disable-wp;
+	max-frequency = <150000000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc_bus4 &sdmmc_clk &sdmmc_cmd &sdmmc_det>;
+	rockchip,default-sample-phase = <90>;
+	sd-uhs-sdr12;
+	sd-uhs-sdr25;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
+	vmmc-supply = <&vcc3v3_sd>;
+	vqmmc-supply = <&vccio_sd>;
+	status = "okay";
+};
+
+&sdio0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	bus-width = <4>;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	max-frequency = <200000000>;
+	mmc-pwrseq = <&sdio_pwrseq>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdio0_bus4 &sdio0_cmd &sdio0_clk>;
+	post-power-on-delay-ms = <50>;
+	non-removable;
+	sd-uhs-sdr104;
+	status = "okay";
+
+	sdio_wifi@1 {
+
+		reg = <1>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PA7 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "host-wake";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_host_wake>;
+	};
+};
+
+&tsadc {
+	status = "okay";
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0m0_xfer>;
+	status = "okay";
+};
+
+/*
+ * ★ 已注释：内核 6.18 的 rk3528.dtsi 里**没有 usb2phy0_host 节点**
+ *   （实测 dtc 报 "Label or path usb2phy0_host not found"）。
+ *   RK3528 是 Linux 6.14 才引入的，该 SoC 的 usb2phy0_host 支持尚不完整。
+ *   保留原文以便内核补齐后直接恢复。
+ * &usb2phy0_host {
+ * 	phy-supply = <&vcc5v0_sys>;
+ * 	status = "okay";
+ * };
+ */
+
+/*
+ * ★ 已注释：内核 6.18 的 rk3528.dtsi 里**没有 usb2phy0_otg 节点**
+ *   （实测 dtc 报 "Label or path usb2phy0_otg not found"）。
+ *   RK3528 自 Linux 6.14 引入，该 SoC 的 USB2 PHY 支持尚不完整。
+ *   保留原文以便内核补齐后直接恢复。
+ * &usb2phy0_otg {
+ * 	phy-supply = <&vcc5v0_sys>;
+ * 	vbus-supply = <&vcc_3v3>;
+ * 	status = "okay";
+ * };
+ */
+
+/*
+ * ★ 已注释：内核 6.18 的 rk3528.dtsi 里**没有 usb2phy 节点**
+ *   （实测 dtc 报 "Label or path usb2phy not found"）。
+ *   RK3528 自 Linux 6.14 引入，该 SoC 的 USB2 PHY 支持尚不完整。
+ *   保留原文以便内核补齐后直接恢复。
+ * &usb2phy {
+ * 	status = "okay";
+ * };
+ */
+
+// &usbdrd30 {
+//	status = "okay";
+// };
+
+// &usbdrd_dwc3 {
+// 	dr_mode = "host";
+// 	status = "okay";
+// };
+
+&usb_host0_ehci {
+	status = "okay";
+};
+
+&usb_host0_ohci {
+	status = "okay";
+};
+
+&usb_host0_xhci {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&saradc {
+    compatible = "rockchip,rk3528-saradc";
+	vref-supply = <&vcc_1v8>;
+	status = "okay";
+};
+
+
+
+&spi1 {  
+	#address-cells = <1>;  
+	#size-cells = <0>;  
+	assigned-clocks = <&cru CLK_SPI1>;  
+	assigned-clock-rates = <200000000>;  
+	num-cs = <1>; 
+	pinctrl-names = "default"; 
+	pinctrl-0 = <&spi1_custom_pins &lcd_backlight_pin>; 
+	status = "okay"; 
+
+	st7789v_panel: panel@0 {  
+		compatible = "sitronix,st7789v";  
+		reg = <0>;  
+		power-supply = <&vcc_3v3_lcd>;  
+
+		pinctrl-names = "default";  
+		pinctrl-0 = <&lcd_dc_pin>;  
+		dc-gpios = <&gpio1 RK_PB4 GPIO_ACTIVE_HIGH>; 
+		backlight-gpios = <&gpio0 RK_PA0 GPIO_ACTIVE_LOW>;  
+
+
+        spi-max-frequency = <6000000>;  
+
+		width = <135>; 
+		height = <240>;  
+		
+		buswidth = <8>;  
+		rotate = <270>;  
+
+
+		/*
+		 * 显示偏移（配合 patches/9999-fbtft-read-display-offset-from-dt.patch）
+		 * ST7789V 135x240 面板在 rotate 后显存窗口需平移才能对上可见区。
+		 * 数值来自原厂 1.14" 偏移 patch：
+		 *   rotate 90/270  ->  x += 40, y += 52
+		 *   rotate 0/180   ->  x += 52, y += 40
+		 * 上游 unifreq PR#19 给 H89K 标的 x-offset=40 / y-offset=52 与此吻合。
+		 */
+		x-offset = <40>;
+		y-offset = <52>;
+		x-offset-0 = <52>;
+		y-offset-0 = <40>;
+		
+		
+		debug = <0>;  
+		spi-cpol;  
+		spi-cpha;  
+		
+	};
+};
+
+ 
