@@ -593,3 +593,21 @@ define Device/hinlink_h88k_v2
 endef
 TARGET_DEVICES += hinlink_h88k_v2
 
+define Device/hinlink_h88k_v3
+  $(Device/hinlink_h88k_v2)
+  DEVICE_MODEL := OPC-H88K V3
+  DEVICE_DTS := rk3588-hinlink-h88k-v3
+  # ★ 必须显式覆盖 u-boot（否则会继承 h88k_v2 的 hinlink-h88k-v2-rk3568，
+  #   导致 U-Boot 去加载 v2 的 dtb）。v3 有独立 defconfig。
+  UBOOT_DEVICE_NAME := hinlink-h88k-v3-rk3588
+  # ★ 屏走 **spidev + 用户态**（沿用 iStoreOS 的做法）：
+  #   DTS 里只有 spidev@0，没有 width/height/rotate 等 fbtft 屏参数，
+  #   所以装 fbtft 驱动也没用 —— 屏参数与画面要靠用户态工具加载。
+  #   若想改成 fbtft 方案，需在本 DTS 的 spidev@0 旁补 panel 节点
+  #   （sitronix,st7789v + 135x240 + rotate + x/y-offset）——
+  #   fbtft/fb_st7789v 本 target 已内建，改 DTS 即可生效。
+  # spidev 已内建（CONFIG_SPI_SPIDEV=y），无需额外包
+  # ★ 通用包集（LuCI + 全无线网卡驱动 + 风扇驱动）
+  $(Device/hinlink_common)
+endef
+TARGET_DEVICES += hinlink_h88k_v3
