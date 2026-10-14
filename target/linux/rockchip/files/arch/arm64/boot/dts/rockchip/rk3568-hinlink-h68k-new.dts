@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * HinLink OPC-H68K (2023 new board)
+ *
+ * HinLink 适配for immortalwrt —— 每机型独立 DTS，不做自适应。
+ *
+ * 硬件事实来源：厂商 2024 QWRT R24.07.07 固件 dtb（已解包反编译逐项核对）
+ * 蓝本：OpenWrt 主线 rk3568-hinlink-h68k.dts
+ *
+ * 2023末改用 H69K 底板出货；带 AIC8800 SDIO WiFi
+ *   ★ 全 H68K 谱系里**唯一**把 WAN 接在 gmac1 上的一代：
+ *     网口：LAN = eth0 eth2 eth3 / **WAN = eth1**
+ *   （其余老机器 a / c / d 系全部 LAN=eth1 … / WAN=eth0）
+ */
+
+/dts-v1/;
+
+#include "rk3568-hinlink-opc.dtsi"
+
+/ {
+	model = "HinLink OPC-H68K (2023 new board)";
+	compatible = "hinlink,opc-h68k-new", "hinlink,h68k", "linkstar,h68k", "rockchip,rk3568";
+
+	aliases {
+		ethernet0 = &gmac0;
+		ethernet1 = &gmac1;
+	};
+};
+&gmac0 {
+	assigned-clocks = <&cru SCLK_GMAC0_RX_TX>, <&cru SCLK_GMAC0>;
+	assigned-clock-parents = <&cru SCLK_GMAC0_RGMII_SPEED>;
+	assigned-clock-rates = <0>, <125000000>;
+	clock_in_out = "output";
+	phy-mode = "rgmii-id";
+	phy-supply = <&vcc3v3_sys>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&gmac0_miim
+		     &gmac0_tx_bus2
+		     &gmac0_rx_bus2
+		     &gmac0_rgmii_clk
+		     &gmac0_rgmii_bus
+		     &gmac0_rstn>;
+	snps,reset-gpios = <&gpio2 RK_PD3 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	tx_delay = <0x3c>;
+	rx_delay = <0x2f>;
+	phy-handle = <&rgmii_phy0>;
+	status = "okay";
+};
+
+&gmac1 {
+	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
+	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>;
+	assigned-clock-rates = <0>, <125000000>;
+	clock_in_out = "output";
+	phy-mode = "rgmii-id";
+	phy-supply = <&vcc3v3_sys>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&gmac1m1_miim
+		     &gmac1m1_tx_bus2
+		     &gmac1m1_rx_bus2
+		     &gmac1m1_rgmii_clk
+		     &gmac1m1_rgmii_bus
+		     &gmac1_rstn>;
+	snps,reset-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	tx_delay = <0x4f>;
+	rx_delay = <0x26>;
+	phy-handle = <&rgmii_phy1>;
+	status = "okay";
+};
+
+&mdio0 {
+	rgmii_phy0: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+	};
+};
+
+&mdio1 {
+	rgmii_phy1: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+	};
+};
+
+&{/} {
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		clocks = <&rk809 1>;
+		clock-names = "ext_clock";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_enable>;
+		post-power-on-delay-ms = <200>;
+		power-off-delay-us = <5000000>;
+		reset-gpios = <&gpio3 RK_PD5 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&{/} {
+	vcc3v3_sd_pwr: vcc3v3-sd-pwr {
+		compatible = "regulator-fixed";
+		enable-active-high;
+		gpio = <&gpio0 RK_PA6 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vcc3v3_sd_pwr_en>;
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-name = "vcc3v3_sd_pwr";
+		vin-supply = <&vcc5v0_sys>;
+	};
+};
+
+&sdmmc2 {
+	bus-width = <4>;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	disable-wp;
+	keep-power-in-suspend;
+	max-frequency = <15000000>;
+	mmc-pwrseq = <&sdio_pwrseq>;
+	non-removable;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc2m0_bus4 &sdmmc2m0_cmd &sdmmc2m0_clk>;
+	sd-uhs-sdr25;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
+	status = "okay";
+	vmmc-supply = <&vcc3v3_sys>;
+	vqmmc-supply = <&vcc3v3_sd_pwr>;
+
+	sdio_wifi: sdio-wifi@0 {
+		interrupt-parent = <&gpio3>;
+		interrupts = <RK_PD4 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "host-wake";
+		reg = <0>;
+	};
+};
+
+/*
+ * ★ 原&rk809 { ext_32k_clk_out { rockchip,grf = <&rk809_grf 0>; } } 已删除
+ *
+ *   原因：Linux 6.18 的 rk3568 SoC dtsi 里**没有 rk809 节点，也没有 rk809_grf
+ *   标签**（6.18 已把 SoC 拆分到 rk356x-base.dtsi，RK809 PMIC 不在其中）。
+ *   保留这段会因 phandle 找不到而**编译失败**。
+ *
+ *   佐证：6.18 内核自带的 rk3568-hinlink-h68k.dts（官方蓝本）也没有这段。
+ *   而本仓库的 rk3568-hinlink-opc.dtsi 与 6.18 内核自带的同名文件
+ *   **sha256 完全一致**，说明这份 dtsi 已是上游官方版本 ——
+ *   上游没引用 rk809_grf，说明它确实不需要。
+ *
+ *   这个 32.768kHz 时钟输出是给 RTC 用的；RK3568 板载 RTC 走
+ *   hym8563（I2C），不依赖 RK809。若你的机器确实需要它，
+ *   应改用 `rk809` 相关的正确写法或另找时钟源。
+ */
+
+
+&pinctrl {
+	sdmmc {
+		vcc3v3_sd_pwr_en: vcc3v3-sd-pwr-en {
+			rockchip,pins = <0 RK_PA6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		/*
+		 * ★ sdmmc2m0_bus4 / _cmd / _clk 的定义**已删除**：
+		 *   内核 rk3568-pinctrl.dtsi 已提供同名标签，内容与我们逐项相同
+		 *   （如 <3 RK_PC6 3 &pcfg_pull_up_drv_level_2>），重定义会报
+		 *   duplicate_label。&sdmmc2 的 pinctrl-0 照常引用内核定义。
+		 */
+
+	};
+
+	wifi {
+		wifi_enable: wifi-enable {
+			rockchip,pins = <3 RK_PD5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+&pinctrl {
+	gmac {
+		gmac0_rstn: gmac0-rstn {
+			rockchip,pins = <2 RK_PD3 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		gmac1_rstn: gmac1-rstn {
+			rockchip,pins = <1 RK_PB0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
