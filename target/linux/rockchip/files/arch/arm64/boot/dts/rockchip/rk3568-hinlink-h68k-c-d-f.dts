@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * HinLink OPC-H68K c-d-f
+ *
+ * HinLink 适配 for immortalwrt —— 每机型独立 DTS，不做自适应。
+ *
+ * ★ 本文件承载 c / d / f 三个板本（2026-10-12 合并）：
+ *     原 rk3568-hinlink-h68k-c.dts 与 rk3568-hinlink-h68k-d.dts
+ *     去注释/归一 model+compatible 后 **0 行实质差异**；
+ *     且 02_network 映射在当日更正后已一致（LAN eth1 eth2 eth3 / WAN eth0）。
+ *   compatible 里保留旧标识（hinlink,opc-h68k-c / -d）作为次串，
+ *   便于旧 DTB / 厂商写的 board.d 继续匹配。
+ *
+ * 硬件事实来源：厂商 2022 R22.7.19/R22.8.22 与 2023 R23.4.20 固件 dtb
+ * 蓝本：OpenWrt 主线 rk3568-hinlink-h68k.dts
+ *
+ * 2×RTL8125 2.5G + 2×千兆，无板载 WiFi
+ *   网口：LAN = eth1 eth2 eth3 / **WAN = eth0**（老一代把 WAN 焊在 gmac0 上）
+ *   （2026-10-12 按实机更正：旧版照抄 2022 厂商固件写成 WAN=eth1，实机是 eth0）
+ *
+ * ★ SATA 变体（文件名不带 -usb）：combphy0 让给 SATA，USB3.0 不可用
+ *   需要 USB3.0 的机器请用 rk3568-hinlink-h68k-c-d-f-usb.dts
+ */
+
+/dts-v1/;
+
+#include "rk3568-hinlink-opc.dtsi"
+
+/ {
+	model = "HINLINK OPC-H68K c-d-f (2022~2023.4, SATA)";
+	compatible = "hinlink,opc-h68k-c-d-f", "hinlink,opc-h68k-c", "hinlink,opc-h68k-d", "hinlink,h68k", "linkstar,h68k", "rockchip,rk3568";
+
+	aliases {
+		ethernet0 = &gmac0;
+		ethernet1 = &gmac1;
+	};
+};
+&gmac0 {
+	assigned-clocks = <&cru SCLK_GMAC0_RX_TX>, <&cru SCLK_GMAC0>;
+	assigned-clock-parents = <&cru SCLK_GMAC0_RGMII_SPEED>;
+	assigned-clock-rates = <0>, <125000000>;
+	clock_in_out = "output";
+	phy-mode = "rgmii-id";
+	phy-supply = <&vcc3v3_sys>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&gmac0_miim
+		     &gmac0_tx_bus2
+		     &gmac0_rx_bus2
+		     &gmac0_rgmii_clk
+		     &gmac0_rgmii_bus
+		     &gmac0_rstn>;
+	snps,reset-gpios = <&gpio2 RK_PD3 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	tx_delay = <0x3c>;
+	rx_delay = <0x2f>;
+	phy-handle = <&rgmii_phy0>;
+	status = "okay";
+};
+
+&gmac1 {
+	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
+	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>;
+	assigned-clock-rates = <0>, <125000000>;
+	clock_in_out = "output";
+	phy-mode = "rgmii-id";
+	phy-supply = <&vcc3v3_sys>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&gmac1m1_miim
+		     &gmac1m1_tx_bus2
+		     &gmac1m1_rx_bus2
+		     &gmac1m1_rgmii_clk
+		     &gmac1m1_rgmii_bus
+		     &gmac1_rstn>;
+	snps,reset-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	tx_delay = <0x4f>;
+	rx_delay = <0x26>;
+	phy-handle = <&rgmii_phy1>;
+	status = "okay";
+};
+
+&mdio0 {
+	rgmii_phy0: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+	};
+};
+
+&mdio1 {
+	rgmii_phy1: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+	};
+};
+
+&pinctrl {
+	gmac {
+		gmac0_rstn: gmac0-rstn {
+			rockchip,pins = <2 RK_PD3 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		gmac1_rstn: gmac1-rstn {
+			rockchip,pins = <1 RK_PB0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+/* ============================================================
+ * SATA 变体：combphy0 让给 SATA，USB3.0 不可用
+ *
+ * ★ RK3568 硬件复用关系（rk3568.dtsi 实证）：
+ *     sata0    phys = <&combphy0 PHY_TYPE_SATA>   (phy@fe820000)
+ *     USB3.0   也需要 combphy0 作 PHY_TYPE_USB3
+ *   combphy 同一时刻只能是一种 PHY_TYPE ⇒ SATA 与 USB3.0 **二选一**。
+ *
+ * 本变体使能 sata0（继承主线 opc.dtsi 的 status="okay"）。
+ * 需要 USB3.0 的机器请用 rk3568-hinlink-h68k-c-d-f-usb.dts。
+ *
+ * ★ 网口不受影响：2.5G 网卡走独立的 pcie30phy（phy@fe8c0000），
+ *   与 combphy0 无关，因此启用 SATA 不改变网口数量。
+ *
+ * ★ 该复用只存在于 2022-2023 老机器（h68k-a-b / c-d-f 两组的两个变体）。
+ *   新机 h68k-new 与 h69k 系不涉及此复用。
+ * ============================================================ */
+
+&sata0 {
+	status = "okay";
+};
