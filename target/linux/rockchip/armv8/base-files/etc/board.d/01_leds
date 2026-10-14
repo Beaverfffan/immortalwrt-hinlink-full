@@ -51,6 +51,112 @@ widora,mangopi-m28k)
 	ucidef_set_led_netdev "wan" "WAN" "white:wan" "eth1"
 	ucidef_set_led_netdev "lan" "LAN" "white:lan" "eth0"
 	;;
+		# ======================= RK3568（rk3568-hinlink-opc.dtsi）=======================
+
+		# ---- H68K a-b（2022 双千兆，2 口）：WAN = eth0 ----
+		# 2026-10-12 改名：h68k-a / h68k-a-usb → h68k-a-b / h68k-a-b-usb
+		hinlink,opc-h68k-a-b|\
+		hinlink,opc-h68k-a-b-usb|\
+		hinlink,opc-h68k-a|\
+		hinlink,opc-h68k-a-usb|\
+		linkstar,opc-h68k-a)
+			ucidef_set_led_netdev "wan" "WAN" "blue:wan" "eth0"
+			;;
+
+		# ---- H68K c-d-f（2022~2023.4 四网口）：WAN = eth0 ----
+		# ★ 2026-10-12 按实机更正：原来写 eth1（照抄 2022 厂商固件），实机是 eth0。
+		#   同日把 c / d 与 c-usb3 / d-usb 合并为 c-d-f / c-d-f-usb。
+		# 同时收上游/厂商的统称 hinlink,h68k / linkstar,h68k（通用镜像兜底；
+		# board_name 取的是 compatible 的**第一个**串，本仓库机型走不到这组）。
+		hinlink,opc-h68k-c-d-f|\
+		hinlink,opc-h68k-c-d-f-usb|\
+		hinlink,opc-h68k-c|\
+		hinlink,opc-h68k-c-usb|\
+		hinlink,opc-h68k-c-usb3|\
+		hinlink,opc-h68k-d|\
+		hinlink,opc-h68k-d-usb|\
+		linkstar,opc-h68k-c|\
+		linkstar,opc-h68k-d|\
+		hinlink,h68k|\
+		linkstar,h68k)
+			ucidef_set_led_netdev "wan" "WAN" "blue:wan" "eth0"
+			;;
+
+		# ---- H68K new（2023末~2024）：新一代，WAN 在 gmac1 ⇒ eth1 ----
+		hinlink,opc-h68k-new)
+			ucidef_set_led_netdev "wan" "WAN" "blue:wan" "eth1"
+			;;
+
+		# ---- H69K 三网口：WAN = eth0（gmac0 被 disabled，gmac1 枚举成 eth0）----
+		hinlink,opc-h69k|\
+		hinlink,h69k)
+			ucidef_set_led_netdev "wan" "WAN" "blue:wan" "eth0"
+			;;
+
+		# ---- H69K-mini 四网口：WAN = eth1（gmac0/gmac1 都开，WAN 在 gmac1）----
+		hinlink,opc-h69k-mini)
+			ucidef_set_led_netdev "wan" "WAN" "blue:wan" "eth1"
+			;;
+
+		# ---- H66K：两个 GMAC 都 disabled，只有 2 路 PCIe 2.5G ----
+		hinlink,opc-h66k|\
+		hinlink,h66k)
+			ucidef_set_led_netdev "wan" "WAN" "blue:wan" "eth0"
+			;;
+
+		# ======================= RK3528 =======================
+
+		# ---- H28K：双口（gmac1 板载 + PCIe RTL8111H）----
+		hinlink,opc-h28k|\
+		hinlink,h28k|\
+		hlink,h28k|\
+		linkstar,h28k|\
+		linkstar,opc-h28k)
+			ucidef_set_led_netdev "wan" "WAN" "blue:wan" "eth1"
+			ucidef_set_led_netdev "lan" "LAN" "amber:lan" "eth0"
+			;;
+
+		# ---- H29K 全系（单口 + 4G/5G 模组灯）----
+		# 厂商固件 01_leds 未列 h29k（落到官方兜底，等于不配 LED）；
+		# 这里按 DTS 的 label 原值补上，两个模组灯默认熄灭。
+		hinlink,opc-h29k|\
+		hinlink,h29k|\
+		hinlink,h29k-v1.3-114|\
+		hinlink,h29k-v1.3-1.14|\
+		hinlink,h29k-v5-114|\
+		hinlink,h29k-v5-1.14|\
+		hinlink,h29k-v5-149|\
+		hinlink,h29k-v5-1.49)
+			ucidef_set_led_default "work" "WORK" "green:work" "1"
+			ucidef_set_led_default "modem_4g" "4G" "red:modem_4g" "0"
+			ucidef_set_led_default "modem_5g" "5G" "blue:modem_5g" "0"
+			;;
+
+		# ---- HT2（单口）----
+		hinlink,opc-ht2|\
+		hinlink,ht2|\
+		hlink,ht2)
+			ucidef_set_led_netdev "lan" "LAN" "amber:lan" "eth0"
+			;;
+
+		# ======================= RK3588 =======================
+
+		# ---- H88K v2 / v3 ----
+		# 标签来自 rk3588-hinlink.dtsi 的 label（旧式，不是 color/function）
+		hinlink,h88k-v2|\
+		hinlink,h88k-v3)
+			ucidef_set_led_netdev "wan" "WAN" "blue:net" "eth0"
+			ucidef_set_led_ide "disk" "DISK" "yellow:disk"
+			;;
+
+		# ---- H89K ----
+		# 厂商固件 01_leds 原值（逐字照抄）：
+		#   ucidef_set_led_netdev "net" "LAN Activity" "green:sys" "br-lan" "tx" "rx"
+		hinlink,opc-h89k|\
+		hinlink,h89k)
+			ucidef_set_led_netdev "net" "LAN Activity" "green:sys" "br-lan" "tx" "rx"
+			;;
+
 esac
 
 board_config_flush

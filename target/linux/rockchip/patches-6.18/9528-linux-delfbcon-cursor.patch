@@ -1,0 +1,38 @@
+From: HinLink adaptation for immortalwrt
+Subject: [PATCH] fbcon: disable hardware text cursor
+
+HinLink 的 SPI 小屏（H29K / H89K）接 framebuffer 控制台时，硬件光标会在
+屏上留下闪烁色块，且与 fbtft 刷新的画面错位。在 fb_flashcursor() 与
+fbcon_cursor() 开头直接 return，只禁硬件光标，软件光标不受影响。
+
+★ 上下文按 immortalwrt master + rockchip 6.18.55 实测生成。
+  6.18 里 fbcon 的私有结构体已从 `struct fbcon_ops` 改名为
+  `struct fbcon_par`，照抄旧上下文会导致 Hunk #1 FAILED：
+
+    -	struct fbcon_ops *ops = container_of(work, struct fbcon_ops, cursor_work.work);
+    +	struct fbcon_par *par = container_of(work, struct fbcon_par, cursor_work.work);
+
+  另外 fbcon_cursor() 第二参数已是 `bool enable`（不是 `int mode`）。
+
+已在真实构建树验证 patch -p1 干净应用（无 fuzz、无 offset）。
+
+Signed-off-by: HinLink immortalwrt adaptation
+---
+--- a/drivers/video/fbdev/core/fbcon.c
++++ b/drivers/video/fbdev/core/fbcon.c
+@@ -371,6 +371,7 @@
+ 
+ static void fb_flashcursor(struct work_struct *work)
+ {
++	return;
+ 	struct fbcon_par *par = container_of(work, struct fbcon_par, cursor_work.work);
+ 	struct fb_info *info;
+ 	struct vc_data *vc = NULL;
+@@ -1336,6 +1337,7 @@
+ 
+ static void fbcon_cursor(struct vc_data *vc, bool enable)
+ {
++	return;
+ 	struct fb_info *info = fbcon_info_from_console(vc->vc_num);
+ 	struct fbcon_par *par = info->fbcon_par;
+  	int c = scr_readw((u16 *) vc->vc_pos);

@@ -659,3 +659,6 @@ define Device/xunlong_orangepi-r1-plus-lts
   DEVICE_PACKAGES := kmod-usb-net-rtl8152
 endef
 TARGET_DEVICES += xunlong_orangepi-r1-plus-lts
+
+# HinLink 机型（外部维护，便于同步）
+include ./armv8.mk.hinlink

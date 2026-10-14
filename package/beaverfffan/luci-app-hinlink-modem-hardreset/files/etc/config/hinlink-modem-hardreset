@@ -1,0 +1,39 @@
+# HinLink 5G 模组控制 —— 默认配置
+#
+# 这个文件由 target base-files 首次安装生成；sysupgrade 会保留它
+# （/etc/config/ 属于保留项），所以升级不会覆盖你的修改。
+#
+# 生效方式：/etc/init.d/hinlink-modem-hardreset 在 start() 时读取；
+#          LuCI「网络 → 5G 模组」页面保存后自动应用。
+
+config hinlink-modem-hardreset 'modem'
+	# 开机是否执行本服务的 start（0 = 完全不碰模组，只留手动命令）
+	option enabled '1'
+
+	# 开机是否自动软复位一次（1 = 复位）。
+	# 模组冷启动不认网卡/注不上网时可以打开。
+	option auto_reset '0'
+
+	# 拉复位的保持时长（毫秒）。模组手册一般要求 RESET 脉宽 >= 100us，
+	# 这里默认给 300ms 留足余量；若模组有特殊要求再调。
+	option hold_ms '300'
+
+	# 复位释放后等模组启动的时间（秒）。
+	# 原 regulator 版的 startup-delay-us = 2s 就是等这个，现由脚本承担。
+	# ⚠️ FM160 实际重新枚举约需 20s（实测），这里只等 2s 是为了不阻塞
+	#    开机流程；「模组到底回来了没」交给日志里的 hotplug 记录去回答。
+	option boot_wait '2'
+
+	# 日志最多保留多少行（超过则轮转成「只留最近一半」）。
+	# 日志文件 /etc/hinlink-modem-hardreset.log 在 overlay 上，sysupgrade 会保留。
+	# 同时也会写一份到 syslog（logger -t hinlink-modem-hardreset）。
+	option log_max_lines '300'
+
+	# 模组识别方式（2026-10-14 起）：
+	#   默认 0 —— 按**接口结构**判断，不看 VID：
+	#             导出了 ttyUSB*/ttyACM*/cdc-wdm*，或有 USB 网卡 + 0xff 接口
+	#             就算模组。任何厂家的 4G/5G 模组都会命中；U 盘 / 键鼠 / HUB /
+	#             普通 USB 网卡不会。换别家模组无需改任何代码。
+	#   改成 1 —— 无脑通配：任何非 root-hub 的 USB 设备插拔都记一条，不做
+	#             识别。只在「明明插着模组却判不出来」时用来排查。
+	option usb_all '0'

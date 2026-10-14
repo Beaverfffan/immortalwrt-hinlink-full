@@ -1,0 +1,84 @@
+#!/bin/sh
+#
+# rpcd shell 插件：把 HinLink 5G 模组的控制暴露给 LuCI / ubus
+#
+# rpcd 的 shell 插件契约：
+#   <plugin> list            -> stdout 输出 {"方法名": {"参数名":"类型", ...}, ...}
+#   <plugin> call <方法名>   -> 从 stdin 读 JSON 参数，stdout 输出 JSON 结果
+#
+# ★ 这里**不用 jshn**，直接手拼 JSON —— 输出结构很简单，
+#   少一层依赖（jshn 要先确认 /usr/bin/jshn 在不在）更稳。
+#   唯一的参数解析（log 的 lines）用 sed 抠整数，够用且零依赖。
+#
+# 实际逻辑全部复用 /usr/libexec/hinlink-modem-hardreset（CLI 与 LuCI 同一份实现）。
+#
+# 对应 ACL：/usr/share/rpcd/acl.d/luci-app-hinlink-modem-hardreset.json
+
+MODEM=/usr/libexec/hinlink-modem-hardreset
+
+esc() {
+	# JSON 字符串转义：反斜杠、双引号，并去掉控制字符
+	printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037'
+}
+
+# $1 = 子命令名（传给 MODEM） $2 = 展示用的动作名
+do_action() {
+	local out rc
+	out="$("$MODEM" "$1" 2>&1)"
+	rc=$?
+	# 多行压成一行，便于前端直接显示
+	out="$(printf '%s' "$out" | tr '\n' ' ')"
+	if [ "$rc" = "0" ]; then
+		printf '{"ok":true,"message":"%s"}\n' "$(esc "$out")"
+	else
+		printf '{"ok":false,"message":"%s"}\n' "$(esc "$out")"
+	fi
+}
+
+case "$1" in
+list)
+	cat <<'EOF'
+{
+	"status": {},
+	"reset": {},
+	"power_off": {},
+	"power_on": {},
+	"usb_reset": {},
+	"log": { "lines": "integer" },
+	"log_clear": {}
+}
+EOF
+	;;
+
+call)
+	method="$2"
+	# rpcd 会往 stdin 送 JSON 参数；读进来（多数方法用不到）
+	in="$(cat 2>/dev/null)"
+
+	case "$method" in
+	status)
+		"$MODEM" status-json 2>/dev/null || printf '{"rfkill_found":0}\n'
+		;;
+	reset)     do_action reset ;;
+	power_off) do_action power-off ;;
+	power_on)  do_action power-on ;;
+	usb_reset) do_action usb-reset ;;
+	log)
+		lines="$(printf '%s' "$in" \
+			| sed -n 's/.*"lines"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+		case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
+		"$MODEM" log-json "$lines" 2>/dev/null \
+			|| printf '{"total":0,"showing":0,"entries":[]}\n'
+		;;
+	log_clear) do_action log-clear ;;
+	*)
+		printf '{"ok":false,"message":"unknown method: %s"}\n' "$(esc "$method")"
+		;;
+	esac
+	;;
+
+*)
+	echo "usage: $0 {list|call <method>}" >&2
+	exit 1
+	;;
+esac

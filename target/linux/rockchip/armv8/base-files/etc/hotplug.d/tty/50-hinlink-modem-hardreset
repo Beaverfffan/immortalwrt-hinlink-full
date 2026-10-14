@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+# HinLink 5G 模组 —— 串口（/dev/ttyUSB*）的上线与下线 -> 记进日志
+#
+# 内核会为 tty 设备发 uevent（subsystem=tty），procd 转发到
+# /etc/hotplug.d/tty/。实测（H69K + FM160）一次复位的事件序列：
+#
+#   ACTION=remove DEVNAME=ttyUSB0 DEVPATH=.../6-1:1.0/ttyUSB0/tty/ttyUSB0   <- 要
+#   ACTION=unbind DEVNAME=      DEVPATH=.../6-1:1.0/ttyUSB0                 <- 不要
+#   ACTION=remove DEVNAME=      DEVPATH=.../6-1:1.0/ttyUSB0                 <- 不要
+#   ...（ttyUSB1/2/3 同上）
+#   ACTION=add    DEVNAME=      DEVPATH=.../6-1:1.0/ttyUSB0                 <- 不要
+#   ACTION=add    DEVNAME=ttyUSB0 DEVPATH=.../6-1:1.0/ttyUSB0/tty/ttyUSB0   <- 要
+#   ACTION=bind   DEVNAME=      DEVPATH=.../6-1:1.0/ttyUSB0                 <- 不要
+#
+# ★ 过滤器就一条：「DEVNAME 必须非空」。
+#   接口级事件和 bind/unbind 事件的 DEVNAME 都是空的，只有**真正的字符设备
+#   节点**才带 DEVNAME。少了这个过滤，一个串口会被记 3 遍。
+#
+# ★ 为什么不能只靠 /etc/hotplug.d/usb（设备级）+ wait-tty（轮询）：
+#   那两处只能告诉你「USB 设备上线了」和「串口终于出现了」，
+#   **看不到串口消失的瞬间**，也看不到每个口各自的上下线。
+#   复位排查时真正要问的是「4 个口是不是都回来了、哪个没回来」。
+
+case "$ACTION" in add|remove) ;; *) exit 0 ;; esac
+[ -n "$DEVNAME" ] || exit 0
+case "$DEVNAME" in ttyUSB*|ttyACM*) ;; *) exit 0 ;; esac
+
+case "$ACTION" in
+	add)    /usr/libexec/hinlink-modem-hardreset log-add OK   "串口上线：/dev/$DEVNAME" ;;
+	remove) /usr/libexec/hinlink-modem-hardreset log-add WARN "串口下线：/dev/$DEVNAME" ;;
+esac
+
+exit 0

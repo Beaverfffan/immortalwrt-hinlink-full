@@ -808,3 +808,519 @@ CONFIG_XZ_DEC_BCJ=y
 CONFIG_ZLIB_DEFLATE=y
 CONFIG_ZLIB_INFLATE=y
 CONFIG_ZONE_DMA32=y
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem-hardreset、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem-hardreset、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+
+# ============ HinLink 追加段（由 tools/integrate.py 幂等追加） ============
+# 目的：把 framebuffer / fbtft 小屏栈在 rockchip target 上**内建成 =y**。
+#
+# 背景（实证）：immortalwrt 的 FB 栈被 `package/kernel/linux/modules/video.mk`
+# 用 FBDEV_TARGETS 限制成
+#     @(TARGET_bcm27xx||TARGET_sunxi||TARGET_x86_legacy||TARGET_x86_geode)
+# ⇒ rockchip 上 **kmod-fb / kmod-fb-sys-* / kmod-fb-tft 全部不存在**，
+#   所以 `kmod-fb-tft-st7789v`、`kmod-fb-tft-gc9307` 这类包名根本编不出来
+#   （上一版 armv8.mk.hinlink 里就是这么写的，从未通过编译）。
+#
+# 这里改为走 target config：把 FB core + fbtft + 具体面板驱动直接内建。
+# 好处：不依赖 package 层，不受 FBDEV_TARGETS 限制，DTS 里的 panel 节点
+#       开机即绑定；H29K 1.14"/1.49"、H89K 的屏都能直接点亮。
+#
+# 已逐个核对过符号在 Linux 6.18.55 的 Kconfig 中存在；否则内核 oldconfig
+# 会丢弃并在编译日志里报 “not found”。
+#
+# ---- 另：5G 模组软复位依赖 rfkill-gpio 必须**内建** =y ----
+# 复位脚交给 rfkill-gpio（见 docs/HARDWARE.md §四），它必须在**内核启动期**
+# 就 probe 完，这样用户态任何脚本（/etc/init.d/hinlink-modem-hardreset、/etc/rc.local）
+# 才都能看到 /sys/class/rfkill/rfkillN/。
+#
+# 时序依据（已对着 6.18 源码逐条核过）：
+#   · CONFIG_RFKILL_GPIO=y（内建）→ module_platform_driver 的 module_init
+#     展开成 __initcall() → device_initcall（级别 6）
+#     （include/linux/module.h: `#define module_init(x) __initcall(x);`）
+#   · 所有 initcall 都在 kernel_init_freeable() 里跑完，之后才
+#     run_init_process("/sbin/init")（init/main.c）
+#   ⇒ 用户态**一定**晚于 rfkill 设备的创建，不存在"加载太晚看不到"。
+#
+# ⚠️ 若将来变成 =m，就要等 kmods 服务加载，那时脚本可能看不到设备。
+#    所以这里**显式写死 =y**，不去依赖 rockchip armv8 config-6.18 里
+#    那一行（那是上游的，可能被改）。
+# ============ HinLink begin ============
+CONFIG_RFKILL=y
+CONFIG_RFKILL_GPIO=y
+
+CONFIG_FB=y
+CONFIG_FB_DEVICE=y
+CONFIG_FB_DEFERRED_IO=y
+CONFIG_FB_BACKLIGHT=y
+CONFIG_FB_SYS_FILLRECT=y
+CONFIG_FB_SYS_COPYAREA=y
+CONFIG_FB_SYS_IMAGEBLIT=y
+CONFIG_FB_SYSMEM_FOPS=y
+CONFIG_FB_TFT=y
+CONFIG_FB_TFT_ST7789V=y
+CONFIG_FB_TFT_GC9307=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_VT=y
+CONFIG_VT_CONSOLE=y
+CONFIG_FONTS=y
+CONFIG_FONT_8x16=y
+# --- 下面 13 项是「因为开了 VT/FB 才第一次可见」的新符号 ---
+# OpenWrt 的 generic/target config 里没有它们，内核 syncconfig 会当成 (NEW)
+# 并交互提问 → 非交互构建直接失败（实测报
+#   "Enable character translations in console (CONSOLE_TRANSLATIONS) [Y/n/?] (NEW)"）。
+# 用 `make ARCH=arm64 listnewconfig` 对着合并后的 .config 精确列出来，就是这 13 个。
+# ⇒ 必须显式写死，缺一项构建就停在那一项上。
+CONFIG_CONSOLE_TRANSLATIONS=y
+# CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY is not set
+# CONFIG_FRAMEBUFFER_CONSOLE_ROTATION is not set
+# CONFIG_FONT_8x8 is not set
+# CONFIG_FONT_6x11 is not set
+# CONFIG_FONT_7x14 is not set
+# CONFIG_FONT_PEARL_8x8 is not set
+# CONFIG_FONT_ACORN_8x8 is not set
+# CONFIG_FONT_MINI_4x6 is not set
+# CONFIG_FONT_6x10 is not set
+# CONFIG_FONT_10x18 is not set
+# CONFIG_FONT_SUN8x16 is not set
+# CONFIG_FONT_SUN12x22 is not set
+# ============ HinLink end ============

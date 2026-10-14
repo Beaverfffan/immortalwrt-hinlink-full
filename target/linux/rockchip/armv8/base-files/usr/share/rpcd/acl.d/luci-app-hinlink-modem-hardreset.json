@@ -1,0 +1,17 @@
+{
+	"luci-app-hinlink-modem-hardreset": {
+		"description": "HinLink 5G复位（模组硬复位 / 状态 / 日志）",
+		"read": {
+			"ubus": {
+				"hinlink-modem-hardreset": [ "status", "log" ]
+			},
+			"uci": [ "hinlink-modem-hardreset" ]
+		},
+		"write": {
+			"ubus": {
+				"hinlink-modem-hardreset": [ "reset", "power_off", "power_on", "usb_reset", "log_clear" ]
+			},
+			"uci": [ "hinlink-modem-hardreset" ]
+		}
+	}
+}

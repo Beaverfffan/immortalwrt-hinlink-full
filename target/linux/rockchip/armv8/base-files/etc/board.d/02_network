@@ -83,6 +83,121 @@ rockchip_setup_interfaces()
 	sinovoip,rk3568-bpi-r2pro)
 		ucidef_set_interfaces_lan_wan 'lan0 lan1 lan2 lan3' 'eth0'
 		;;
+		# ======================= RK3568 =======================
+
+		# ---- H68K a-b（2022 双千兆，仅 2 口）：WAN = eth0 ----
+		# 2026-10-12 改名：h68k-a / h68k-a-usb → h68k-a-b / h68k-a-b-usb
+		# （旧 compatible 保留在下面，旧 DTB / 厂商写的 board.d 仍能匹配）
+		hinlink,opc-h68k-a-b|\
+		hinlink,opc-h68k-a-b-usb|\
+		hinlink,opc-h68k-a|\
+		hinlink,opc-h68k-a-usb|\
+		linkstar,opc-h68k-a)
+			ucidef_set_interfaces_lan_wan 'eth1' 'eth0'
+			;;
+
+		# ---- H68K c-d-f（2022~2023.4 四网口，2×RTL8125）：WAN = eth0 ----
+		# 旧版这里写的是 WAN=eth1（照抄 2022 厂商固件），实机反馈 c 是 WAN=eth0，
+		# 2026-10-12 更正。四网口机型统一 LAN=eth1 eth2 eth3 / WAN=eth0。
+		# 同日把 c / d 与 c-usb3 / d-usb 合并为 c-d-f / c-d-f-usb 两个机型，
+		# 旧 compatible 全部保留在下面。
+		hinlink,opc-h68k-c-d-f|\
+		hinlink,opc-h68k-c-d-f-usb|\
+		hinlink,opc-h68k-c|\
+		hinlink,opc-h68k-c-usb|\
+		hinlink,opc-h68k-c-usb3|\
+		hinlink,opc-h68k-d|\
+		hinlink,opc-h68k-d-usb|\
+		linkstar,opc-h68k-c|\
+		linkstar,opc-h68k-d|\
+		hinlink,h68k|\
+		linkstar,h68k)
+			ucidef_set_interfaces_lan_wan 'eth1 eth2 eth3' 'eth0'
+			;;
+
+		# ---- H68K new（2023末~2024）：新一代，WAN 在 gmac1 ----
+		#   两个 GMAC 都开 ⇒ gmac0=eth0、gmac1=eth1 ⇒ WAN = eth1
+		hinlink,opc-h68k-new)
+			ucidef_set_interfaces_lan_wan 'eth0 eth2 eth3' 'eth1'
+			;;
+
+		# ---- H69K（三网口）：gmac0 被 disabled，只剩 gmac1 → 枚举成 eth0 ----
+		#   gmac1 = eth0（板载），2×PCIe 2.5G = eth1/eth2
+		#   ★ 新一代的 WAN 都接在 gmac1 上 ⇒ 本机 WAN = eth0（因为 gmac1 就是 eth0）
+		hinlink,opc-h69k|\
+		hinlink,h69k)
+			ucidef_set_interfaces_lan_wan 'eth1 eth2' 'eth0'
+			;;
+
+		# ---- H69K-mini（四网口 = H68K max）----
+		#   ★ 与 H69K 三网口版的关键差别：这里 gmac0 **也开着**
+		#     ⇒ gmac0 = eth0、gmac1 = eth1，2×PCIe 2.5G = eth2/eth3
+		#   ★ 与 h68k-new 同一代、同一网络构成（2×GMAC + 2×RTL8125）
+		#     ⇒ 按「新一代 WAN = gmac1」的同一逻辑，WAN = **eth1**
+		#   （2026-10-12 更正：原来抄成 LAN eth1 eth2 eth3 / WAN eth0）
+		hinlink,opc-h69k-mini)
+			ucidef_set_interfaces_lan_wan 'eth0 eth2 eth3' 'eth1'
+			;;
+
+		# ---- H66K：两个 GMAC 都 disabled（厂商 2024 dtb 实证），
+		#      只有 2 路 PCIe RTL8125 ⇒ eth0/eth1 都是 PCIe 口 ----
+		hinlink,opc-h66k|\
+		hinlink,h66k)
+			ucidef_set_interfaces_lan_wan 'eth1' 'eth0'
+			;;
+
+		# ======================= RK3528 =======================
+
+		# ---- H28K：双口 ----
+		#   eth0 = 板载 RTL8211F RGMII 千兆（gmac1）
+		#   eth1 = PCIe RTL8111H 千兆（PCI 枚举产生，DT 里不写网卡节点）
+		hinlink,opc-h28k|\
+		hinlink,h28k|\
+		hlink,h28k|\
+		linkstar,h28k|\
+		linkstar,opc-h28k)
+			ucidef_set_interfaces_lan_wan 'eth0' 'eth1'
+			;;
+
+		# ---- H29K 全系：单口（厂商 dtb 实证 gmac0 disabled、无 PCIe 网卡）----
+		hinlink,opc-h29k|\
+		hinlink,h29k|\
+		hinlink,h29k-v1.3-114|\
+		hinlink,h29k-v1.3-1.14|\
+		hinlink,h29k-v5-114|\
+		hinlink,h29k-v5-1.14|\
+		hinlink,h29k-v5-149|\
+		hinlink,h29k-v5-1.49)
+			ucidef_set_interfaces_lan_wan 'eth0'
+			;;
+
+		# ---- HT2：单口（厂商 dtb 实证 gmac1、无 PCIe 网卡）----
+		hinlink,opc-ht2|\
+		hinlink,ht2|\
+		hlink,ht2)
+			ucidef_set_interfaces_lan_wan 'eth0'
+			;;
+
+		# ======================= RK3588 =======================
+
+		# ---- H88K v2：两网口（gmac0=eth0 + pcie2x1l1=eth1）----
+		# pcie3x4 是 PCIe x4 插槽位（插扩展网卡/NVMe），不算板载口
+		hinlink,h88k-v2)
+			ucidef_set_interfaces_lan_wan 'eth1' 'eth0'
+			;;
+
+		# ---- H88K v3：三网口（v2 两口 + pcie2x1l2 第三颗 RTL8125）----
+		hinlink,h88k-v3)
+			ucidef_set_interfaces_lan_wan 'eth1 eth2' 'eth0'
+			;;
+
+		# ---- H89K：三口（gmac0=eth0 + 2×RTL8125=eth1/eth2）----
+		# 厂商固件 02_network 原值：hinlink,h89k -> LAN "eth0 eth1" / WAN "eth2"
+		hinlink,opc-h89k|\
+		hinlink,h89k)
+			ucidef_set_interfaces_lan_wan 'eth0 eth1' 'eth2'
+			;;
+
 	*)
 		ucidef_set_interface_lan 'eth0'
 		;;
@@ -145,6 +260,47 @@ rockchip_setup_macs()
 		lan_mac=$(cat /sys/class/net/eth1/address)
 		wan_mac=$(macaddr_add "$lan_mac" -1)
 		;;
+		# ---- 全部 HinLink 机型：从 eMMC 的 CID 生成稳定 MAC ----
+		#   mmcblk0 必须是 **eMMC**（见各 DTS 的 mmc0 alias），
+		#   否则会拿 TF 卡的 CID，换卡就换 MAC。
+		hinlink,opc-h68k-a-b|\
+		hinlink,opc-h68k-a-b-usb|\
+		hinlink,opc-h68k-c-d-f|\
+		hinlink,opc-h68k-c-d-f-usb|\
+		hinlink,opc-h68k-a|\
+		hinlink,opc-h68k-a-usb|\
+		hinlink,opc-h68k-c|\
+		hinlink,opc-h68k-c-usb|\
+		hinlink,opc-h68k-c-usb3|\
+		hinlink,opc-h68k-d|\
+		hinlink,opc-h68k-d-usb|\
+		hinlink,opc-h68k-new|\
+		hinlink,opc-h69k|\
+		hinlink,opc-h69k-mini|\
+		hinlink,opc-h66k|\
+		hinlink,h66k|\
+		hinlink,h68k|\
+		linkstar,h68k|\
+		hinlink,opc-h28k|\
+		hinlink,h28k|\
+		hlink,h28k|\
+		linkstar,h28k|\
+		hinlink,opc-h29k|\
+		hinlink,h29k|\
+		hinlink,h29k-v1.3-114|\
+		hinlink,h29k-v5-114|\
+		hinlink,h29k-v5-149|\
+		hinlink,opc-ht2|\
+		hinlink,ht2|\
+		hlink,ht2|\
+		hinlink,h88k-v2|\
+		hinlink,h88k-v3|\
+		hinlink,opc-h89k|\
+		hinlink,h89k)
+			wan_mac=$(macaddr_generate_from_mmc_cid mmcblk0)
+			lan_mac=$(macaddr_add "$wan_mac" 1)
+			;;
+
 	esac
 
 	[ -n "$lan_mac" ] && ucidef_set_interface_macaddr "lan" $lan_mac

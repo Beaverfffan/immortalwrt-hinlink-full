@@ -1,0 +1,82 @@
+#!/bin/sh /etc/rc.common
+#
+# HinLink 5G 模组：软复位 / 状态查询（CLI 入口）
+#
+# 真正的实现在 /usr/libexec/hinlink-modem-hardreset（CLI 与 LuCI 共用同一份逻辑）。
+# 本文件只做 rc.common 包装，让它可以被 enable（开机记录状态 / 自动复位）。
+#
+# 用法
+# ----
+#   /etc/init.d/hinlink-modem-hardreset status          看 rfkill / regulator / USB 状态
+#   /etc/init.d/hinlink-modem-hardreset reset           软复位模组（推荐）
+#   /etc/init.d/hinlink-modem-hardreset power_off       只拉复位（保持）
+#   /etc/init.d/hinlink-modem-hardreset power_on        只释放复位
+#   /etc/init.d/hinlink-modem-hardreset usb_reset       只在 USB 层重新枚举
+#
+#   （命令名用**下划线**：rc.common 把 EXTRA_COMMANDS 的条目当函数名调用，
+#     shell 函数名不能含 `-`。等价的连字符写法在
+#     /usr/libexec/hinlink-modem-hardreset 上可用，例如 `hinlink-modem-hardreset power-off`。）
+#
+# 开机行为（读 /etc/config/hinlink-modem-hardreset）
+# ----------------------------------------
+#   enabled=1     才跑 start（默认 1；enable 由 /etc/init.d/... enable 控制）
+#   auto_reset=1   start 时自动软复位一次（默认 0）
+#   hold_ms       复位保持时长（默认 300）
+#   boot_wait     释放后等模组启动（默认 2）
+#
+# 机理详见 docs/HARDWARE.md §四。
+
+START=95
+STOP=10
+
+MODEM=/usr/libexec/hinlink-modem-hardreset
+
+EXTRA_COMMANDS="status reset power_off power_on usb_reset log log_clear"
+EXTRA_HELP="	status       显示 5G 模组 rfkill / regulator / USB 状态
+	reset        软复位 5G 模组（拉复位 -> 等 -> 释放 -> 等启动）
+	power_off    只断电 / 拉复位（保持）
+	power_on     只上电 / 释放复位
+	usb_reset    只在 USB 层重新枚举模组
+	log [N]      打印最近 N 行日志（默认 100）
+	log_clear    清空日志文件"
+
+status()    { "$MODEM" status; }
+reset()     { "$MODEM" reset; }
+power_off() { "$MODEM" power-off; }
+power_on()  { "$MODEM" power-on; }
+usb_reset() { "$MODEM" usb-reset; }
+log()       { "$MODEM" log "${1:-100}"; }
+log_clear() { "$MODEM" log-clear; }
+
+start() {
+	[ "$(uci -q get hinlink-modem-hardreset.modem.enabled)" = "0" ] && return 0
+
+	# rfkill-gpio 是内建（=y，device_initcall），用户态一定晚于它 ——
+	# 理论上不用等。留 5 秒窗口只是防「将来它变成模块 / probe defer」。
+	#
+	# ★ H69K 只有一路 GPIO，连「供电使能」都靠 rfkill-gpio 成功 probe，
+	#   所以这里的检查结果对 H69K 尤其重要（连不上网先看这条日志）。
+	local i ok=0
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		if "$MODEM" status-json 2>/dev/null | grep -q '"rfkill_found":1'; then
+			ok=1
+			break
+		fi
+		sleep 0.5
+	done
+
+	if [ "$ok" = "1" ]; then
+		"$MODEM" log-add INFO "开机：rfkill-modem 就绪"
+	else
+		"$MODEM" log-add ERROR "开机：5 秒内没等到 type=wwan 的 rfkill 设备 —— 查 DTS 的 rfkill-modem 节点（label / radio-type）与 CONFIG_RFKILL_GPIO=y"
+	fi
+
+	if [ "$(uci -q get hinlink-modem-hardreset.modem.auto_reset)" = "1" ]; then
+		"$MODEM" log-add INFO "auto_reset=1 → 开机软复位一次"
+		"$MODEM" reset
+	fi
+}
+
+stop() {
+	:
+}

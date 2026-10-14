@@ -289,6 +289,72 @@ define U-Boot/bpi-r2-pro-rk3568
     sinovoip_bpi-r2-pro
 endef
 
+define U-Boot/hinlink-h28k-rk3528
+  $(U-Boot/rk3528/Default)
+  NAME:=HINLINK H28K
+  BUILD_DEVICES:= \
+    hinlink_h28k_rk3528
+endef
+
+define U-Boot/hinlink-h66k-rk3568
+  $(U-Boot/rk3568/Default)
+  NAME:=HINLINK H66K
+  BUILD_DEVICES:= \
+    hinlink_opc-h66k
+endef
+
+define U-Boot/hinlink-h68k-rk3568
+  $(U-Boot/rk3568/Default)
+  NAME:=HINLINK H68K
+  BUILD_DEVICES:= \
+    hinlink_opc-h68k-a \
+    hinlink_opc-h68k-a-usb \
+    hinlink_opc-h68k-c \
+    hinlink_opc-h68k-c-usb3 \
+    hinlink_opc-h68k-d \
+    hinlink_opc-h68k-d-usb \
+    hinlink_opc-h68k-new \
+    hinlink_opc-h69k \
+    hinlink_opc-h69k-mini
+endef
+
+define U-Boot/hinlink-h29k-rk3528
+  $(U-Boot/rk3528/Default)
+  NAME:=HINLINK H29K
+  BUILD_DEVICES:= \
+    hinlink_h29k-v1.3-1.14_rk3528 \
+    hinlink_h29k-v5-1.14_rk3528 \
+    hinlink_h29k-v5-1.49_rk3528
+endef
+
+define U-Boot/hinlink-ht2-rk3528
+  $(U-Boot/rk3528/Default)
+  NAME:=HINLINK OPC-HT2
+  BUILD_DEVICES:= \
+    hinlink_opc-ht2_rk3528
+endef
+
+define U-Boot/hinlink-h88k-v2-rk3588
+  $(U-Boot/rk358x/Default)
+  NAME:=HINLINK H88K V2
+  BUILD_DEVICES:= \
+    hinlink_h88k_v2
+endef
+
+define U-Boot/hinlink-h88k-v3-rk3588
+  $(U-Boot/rk358x/Default)
+  NAME:=HINLINK H88K V3
+  BUILD_DEVICES:= \
+    hinlink_h88k_v3
+endef
+
+define U-Boot/hinlink-h89k-rk3588
+  $(U-Boot/rk358x/Default)
+  NAME:=HINLINK H89K
+  BUILD_DEVICES:= \
+    hinlink_opc-h89k_rk3588
+endef
+
 define U-Boot/easepi-r1-rk3568
   $(U-Boot/rk3568/Default)
   NAME:=LinkEase EasePi R1
@@ -558,6 +624,12 @@ UBOOT_TARGETS := \
   roc-cc-rk3328 \
   rock64-rk3328 \
   rock-pi-e-rk3328 \
+  hinlink-h28k-rk3528 \
+  hinlink-h29k-rk3528 \
+  hinlink-ht2-rk3528 \
+  hinlink-h88k-v2-rk3588 \
+  hinlink-h88k-v3-rk3588 \
+  hinlink-h89k-rk3588 \
   mangopi-m28c-rk3528 \
   mangopi-m28k-rk3528 \
   nanopi-zero2-rk3528 \
@@ -572,6 +644,8 @@ UBOOT_TARGETS := \
   easepi-r1-rk3568 \
   fastrhino-r66s-rk3568 \
   fastrhino-r68s-rk3568 \
+  hinlink-h66k-rk3568 \
+  hinlink-h68k-rk3568 \
   graperain-g3568-v2-rk3568 \
   lyt-t68m-rk3568 \
   mmbox-anas3035-rk3568 \

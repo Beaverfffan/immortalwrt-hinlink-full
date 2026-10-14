@@ -1,0 +1,810 @@
+From: HinLink adaptation for immortalwrt
+Subject: [PATCH] board: rockchip: add HINLINK H88K / H89K u-boot support
+
+上游 openwrt 只为 HINLINK 的 H28K / H66K / H68K 提供了 u-boot；本仓库的
+RK3588 三款（OPC-H88K V2 / V3、OPC-H89K）在 u-boot 里既没有板级 dts，
+也没有 rk806 dtsi，此前只能把 BOOT_FLOW 留空。
+
+本 patch 为其补齐：
+
+  dts/upstream/src/arm64/rockchip/rk3588-hinlink-{h88k-v2,h88k-v3,h89k}.dts
+  arch/arm/dts/rk3588-hinlink-{h88k-v2,h88k-v3,h89k}-u-boot.dtsi
+  configs/hinlink-{h88k-v2,h88k-v3,h89k}-rk3588_defconfig
+
+设计取舍
+--------
+1. **不含 rk806 PMIC 节点**。RK3588 的 PMIC 由 Rockchip TPL
+   (rk3588_ddr_lp4_2112MHz_lp5_2400MHz_v1.19.bin) 在 SPL 之前初始化
+   （DDR 需要电压），U-Boot proper 不必再配一遍。少写这 34 路 regulator
+   反而更安全 —— 抄错电压会把板子拉坏。代价是 U-Boot 下读不到 PMIC。
+2. dts 只保留 eMMC / TF 卡 / 调试串口 —— U-Boot 阶段够用。
+3. defconfig 基于 u-boot 自带的 generic-rk3588_defconfig；
+   target 沿用 CONFIG_TARGET_EVB_RK3588（与上游 generic-rk3588 一致，
+   RK3588 需要一个 CONFIG_TARGET_* 提供板级支持代码）。
+
+存储与串口依据（厂商 dtb vendor-h89k.dtb 与现代 rk3588-hinlink.dtsi 两侧一致）
+    sdhci  eMMC   bus-width 8, non-removable, mmc-hs200-1_8v
+    sdmmc  TF 卡  bus-width 4, cd-gpios gpio0 PA4 低有效, no-mmc
+    uart2  调试串口 uart2m0_xfer, 1500000n8
+
+⚠️ 未实机验证。
+
+Signed-off-by: HinLink immortalwrt adaptation
+---
+--- /dev/null
++++ b/dts/upstream/src/arm64/rockchip/rk3588-hinlink-h88k-v2.dts
+@@ -0,0 +1,137 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * HINLINK OPC-H88K V2
++ *
++ * ★ U-Boot 专用板级设备树（RK3588），与内核的 rk3588-hinlink-*.dts 相互独立。
++ *   只保留 U-Boot 阶段需要的：eMMC / TF 卡 / 调试串口。
++ *
++ * ★ 不含 rk806 PMIC
++ *   RK3588 的 PMIC 由 Rockchip TPL 在 SPL 之前初始化（DDR 需要电压），
++ *   U-Boot proper 不必再配一遍。这样可以让本文件保持最小集，
++ *   避免抄错 34 路 regulator 电压。代价是 U-Boot 下读不到 PMIC。
++ *
++ * ★ 存储与串口依据（厂商 dtb / rk3588-hinlink.dtsi 实测，两者一致）
++ *     sdhci  eMMC  bus-width 8, non-removable, mmc-hs200-1_8v
++ *     sdmmc  TF 卡 bus-width 4, cd-gpios gpio0 PA4 低有效, no-mmc
++ *     uart2  调试串口 uart2m0_xfer, 1500000n8
++ *
++ * ⚠️ 未实机验证。
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/pinctrl/rockchip.h>
++#include "rk3588.dtsi"
++
++/ {
++	model = "HINLINK OPC-H88K V2";
++	compatible = "hinlink,h88k-v2", "rockchip,rk3588";
++
++	aliases {
++		mmc0 = &sdhci;
++		mmc1 = &sdmmc;
++		serial2 = &uart2;
++	};
++
++	chosen {
++		stdout-path = "serial2:1500000n8";
++	};
++};
++
++/* 板载 eMMC（8 bit，不可插拔） */
++&sdhci {
++	bus-width = <8>;
++	no-sdio;
++	no-sd;
++	non-removable;
++	max-frequency = <150000000>;
++	mmc-hs200-1_8v;
++	status = "okay";
++};
++
++/* TF 卡槽（4 bit，卡检测 gpio0 PA4 低有效） */
++&sdmmc {
++	bus-width = <4>;
++	cap-mmc-highspeed;
++	cap-sd-highspeed;
++	cd-gpios = <&gpio0 RK_PA4 GPIO_ACTIVE_LOW>;
++	disable-wp;
++	no-mmc;
++	no-sdio;
++	sd-uhs-sdr104;
++	status = "okay";
++};
++
++/* 调试串口 */
++&uart2 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&uart2m0_xfer>;
++	status = "okay";
++};
++
++/* ============================================================
++ * 板载千兆网口：RTL8211F 走 GMAC0（板子只引出一个千兆口）
++ *   reset = GPIO4_B3 低有效（厂商/armbian/leux 三方一致）
++ * ============================================================ */
++&gmac0 {
++	clock_in_out = "output";
++	phy-mode = "rgmii-rxid";
++	tx_delay = <0x44>;
++	snps,reset-gpio = <&gpio4 RK_PB3 GPIO_ACTIVE_LOW>;
++	snps,reset-active-low;
++	snps,reset-delays-us = <0 20000 100000>;
++
++	phy-handle = <&rgmii_phy>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&gmac0_miim>,
++		    <&gmac0_tx_bus2>,
++		    <&gmac0_rx_bus2>,
++		    <&gmac0_rgmii_clk>,
++		    <&gmac0_rgmii_bus>;
++	status = "okay";
++};
++
++&mdio0 {
++	rgmii_phy: ethernet-phy@1 {
++		compatible = "ethernet-phy-ieee802.3-c22";
++		reg = <0x1>;
++	};
++};
++
++/* gmac1 板子没引出 */
++&gmac1 {
++	status = "disabled";
++};
++
++/* ============================================================
++ * 两个 2.5G RTL8125 走 PCIe（参考 leux 的 H88K U-Boot 适配笔记）
++ *   pcie2x1l1 ETH1 -> reset GPIO4_A2 高有效
++ *   pcie2x1l2 ETH2 -> reset GPIO4_A5 高有效
++ * ============================================================ */
++&combphy1_ps {
++	status = "okay";
++};
++
++&combphy2_psu {
++	status = "okay";
++};
++
++&pcie2x1l1 {
++	reset-gpios = <&gpio4 RK_PA2 GPIO_ACTIVE_HIGH>;
++	status = "okay";
++};
++/* v2 的 combphy0_ps 给了 SATA 座 -> 没有第三个 2.5G 口 */
++
++/* ============================================================
++ * NVMe：M.2 M-Key 走 pcie3x4 + pcie30phy
++ *   reset = GPIO4_B6 高有效
++ * ============================================================ */
++&pcie30phy {
++	status = "okay";
++};
++
++&pcie3x4 {
++	reset-gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>;
++	status = "okay";
++};
+--- /dev/null
++++ b/arch/arm/dts/rk3588-hinlink-h88k-v2-u-boot.dtsi
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * HINLINK OPC-H88K V2 —— U-Boot overlay
++ *
++ * 把 eMMC / TF 卡节点标记为 pre-ram 可用，否则 SPL 阶段找不到启动介质。
++ */
++
++#include "rk3588-u-boot.dtsi"
++
++&sdhci {
++	bootph-pre-ram;
++	bootph-some-ram;
++};
++
++&sdmmc {
++	bootph-pre-ram;
++	bootph-some-ram;
++};
+--- /dev/null
++++ b/configs/hinlink-h88k-v2-rk3588_defconfig
+@@ -0,0 +1,90 @@
++CONFIG_ARM=y
++CONFIG_SKIP_LOWLEVEL_INIT=y
++CONFIG_COUNTER_FREQUENCY=24000000
++CONFIG_ARCH_ROCKCHIP=y
++CONFIG_DEFAULT_DEVICE_TREE="rockchip/rk3588-hinlink-h88k-v2"
++CONFIG_ROCKCHIP_RK3588=y
++CONFIG_ROCKCHIP_HANG_TO_BROM=y
++CONFIG_SPL_SERIAL=y
++# Conforms to upstream generic-rk3588: RK3588 needs a CONFIG_TARGET_*
++# to pull in board support code, so we reuse the EVB target.
++CONFIG_TARGET_EVB_RK3588=y
++# NOTE: do NOT set "# CONFIG_OF_UPSTREAM is not set" (generic-rk3588 has it).
++# With OF_UPSTREAM disabled u-boot looks for the board dts under arch/arm/dts/
++# and requires it to be listed in arch/arm/dts/Makefile; enabling it (default)
++# makes u-boot pick the dts from dts/upstream/src/arm64/rockchip/ automatically,
++# which is where this file lives.
++CONFIG_SYS_LOAD_ADDR=0xc00800
++CONFIG_DEBUG_UART_BASE=0xFEB50000
++CONFIG_DEBUG_UART_CLOCK=24000000
++CONFIG_DEBUG_UART=y
++CONFIG_FIT=y
++CONFIG_FIT_VERBOSE=y
++CONFIG_SPL_FIT_SIGNATURE=y
++CONFIG_SPL_LOAD_FIT=y
++# CONFIG_BOOTMETH_VBE is not set
++CONFIG_LEGACY_IMAGE_FORMAT=y
++CONFIG_OF_SYSTEM_SETUP=y
++CONFIG_DEFAULT_FDT_FILE="rockchip/rk3588-hinlink-h88k-v2.dtb"
++# CONFIG_DISPLAY_CPUINFO is not set
++CONFIG_SPL_MAX_SIZE=0x40000
++# CONFIG_SPL_RAW_IMAGE_SUPPORT is not set
++CONFIG_SPL_ATF=y
++CONFIG_CMD_MEMINFO=y
++CONFIG_CMD_MEMINFO_MAP=y
++CONFIG_CMD_GPIO=y
++CONFIG_CMD_GPT=y
++CONFIG_CMD_MISC=y
++CONFIG_CMD_MMC=y
++CONFIG_CMD_ROCKUSB=y
++CONFIG_CMD_USB_MASS_STORAGE=y
++# CONFIG_CMD_SETEXPR is not set
++CONFIG_CMD_RNG=y
++# CONFIG_SPL_DOS_PARTITION is not set
++CONFIG_SPL_OF_CONTROL=y
++CONFIG_OF_LIVE=y
++CONFIG_OF_SPL_REMOVE_PROPS="clock-names interrupt-parent assigned-clocks assigned-clock-rates assigned-clock-parents"
++CONFIG_ENV_RELOC_GD_ENV_ADDR=y
++# ---- 网络：板载 RTL8211F(GMAC0) + 2x RTL8125(PCIe) ----
++# 注意：generic-rk3588_defconfig 原本有 CONFIG_NO_NET=y
++# （它是无网口的通用板），本板有网口，必须去掉，否则网络驱动不编译。
++CONFIG_PHYLIB=y
++CONFIG_PHY_REALTEK=y
++CONFIG_DWC_ETH_QOS=y
++CONFIG_DWC_ETH_QOS_ROCKCHIP=y
++CONFIG_DM_MDIO=y
++# ---- PCIe：2 个 RTL8125 网卡 + M.2 NVMe ----
++CONFIG_PCI=y
++CONFIG_CMD_PCI=y
++CONFIG_PCIE_DW_ROCKCHIP=y
++CONFIG_RTL8169=y
++CONFIG_CMD_NVME=y
++CONFIG_NVME_PCI=y
++CONFIG_SPL_DM_SEQ_ALIAS=y
++CONFIG_SPL_SYSCON=y
++# CONFIG_ADC is not set
++CONFIG_SPL_CLK=y
++# CONFIG_USB_FUNCTION_FASTBOOT is not set
++CONFIG_ROCKCHIP_GPIO=y
++CONFIG_MISC=y
++CONFIG_SUPPORT_EMMC_RPMB=y
++CONFIG_MMC_DW=y
++CONFIG_MMC_DW_ROCKCHIP=y
++CONFIG_MMC_SDHCI=y
++CONFIG_MMC_SDHCI_SDMA=y
++CONFIG_MMC_SDHCI_ROCKCHIP=y
++CONFIG_PHY_ROCKCHIP_INNO_USB2=y
++CONFIG_SPL_PINCTRL=y
++CONFIG_SPL_RAM=y
++CONFIG_BAUDRATE=1500000
++CONFIG_DEBUG_UART_SHIFT=2
++CONFIG_SYS_NS16550_MEM32=y
++CONFIG_SYSRESET=y
++CONFIG_SYSRESET_PSCI=y
++CONFIG_USB=y
++CONFIG_USB_DWC3=y
++CONFIG_USB_DWC3_GENERIC=y
++CONFIG_USB_GADGET=y
++CONFIG_USB_GADGET_DOWNLOAD=y
++CONFIG_USB_FUNCTION_ROCKUSB=y
++CONFIG_ERRNO_STR=y
+--- /dev/null
++++ b/dts/upstream/src/arm64/rockchip/rk3588-hinlink-h88k-v3.dts
+@@ -0,0 +1,144 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * HINLINK OPC-H88K V3
++ *
++ * ★ U-Boot 专用板级设备树（RK3588），与内核的 rk3588-hinlink-*.dts 相互独立。
++ *   只保留 U-Boot 阶段需要的：eMMC / TF 卡 / 调试串口。
++ *
++ * ★ 不含 rk806 PMIC
++ *   RK3588 的 PMIC 由 Rockchip TPL 在 SPL 之前初始化（DDR 需要电压），
++ *   U-Boot proper 不必再配一遍。这样可以让本文件保持最小集，
++ *   避免抄错 34 路 regulator 电压。代价是 U-Boot 下读不到 PMIC。
++ *
++ * ★ 存储与串口依据（厂商 dtb / rk3588-hinlink.dtsi 实测，两者一致）
++ *     sdhci  eMMC  bus-width 8, non-removable, mmc-hs200-1_8v
++ *     sdmmc  TF 卡 bus-width 4, cd-gpios gpio0 PA4 低有效, no-mmc
++ *     uart2  调试串口 uart2m0_xfer, 1500000n8
++ *
++ * ⚠️ 未实机验证。
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/pinctrl/rockchip.h>
++#include "rk3588.dtsi"
++
++/ {
++	model = "HINLINK OPC-H88K V3";
++	compatible = "hinlink,h88k-v3", "rockchip,rk3588";
++
++	aliases {
++		mmc0 = &sdhci;
++		mmc1 = &sdmmc;
++		serial2 = &uart2;
++	};
++
++	chosen {
++		stdout-path = "serial2:1500000n8";
++	};
++};
++
++/* 板载 eMMC（8 bit，不可插拔） */
++&sdhci {
++	bus-width = <8>;
++	no-sdio;
++	no-sd;
++	non-removable;
++	max-frequency = <150000000>;
++	mmc-hs200-1_8v;
++	status = "okay";
++};
++
++/* TF 卡槽（4 bit，卡检测 gpio0 PA4 低有效） */
++&sdmmc {
++	bus-width = <4>;
++	cap-mmc-highspeed;
++	cap-sd-highspeed;
++	cd-gpios = <&gpio0 RK_PA4 GPIO_ACTIVE_LOW>;
++	disable-wp;
++	no-mmc;
++	no-sdio;
++	sd-uhs-sdr104;
++	status = "okay";
++};
++
++/* 调试串口 */
++&uart2 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&uart2m0_xfer>;
++	status = "okay";
++};
++
++/* ============================================================
++ * 板载千兆网口：RTL8211F 走 GMAC0（板子只引出一个千兆口）
++ *   reset = GPIO4_B3 低有效（厂商/armbian/leux 三方一致）
++ * ============================================================ */
++&gmac0 {
++	clock_in_out = "output";
++	phy-mode = "rgmii-rxid";
++	tx_delay = <0x44>;
++	snps,reset-gpio = <&gpio4 RK_PB3 GPIO_ACTIVE_LOW>;
++	snps,reset-active-low;
++	snps,reset-delays-us = <0 20000 100000>;
++
++	phy-handle = <&rgmii_phy>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&gmac0_miim>,
++		    <&gmac0_tx_bus2>,
++		    <&gmac0_rx_bus2>,
++		    <&gmac0_rgmii_clk>,
++		    <&gmac0_rgmii_bus>;
++	status = "okay";
++};
++
++&mdio0 {
++	rgmii_phy: ethernet-phy@1 {
++		compatible = "ethernet-phy-ieee802.3-c22";
++		reg = <0x1>;
++	};
++};
++
++/* gmac1 板子没引出 */
++&gmac1 {
++	status = "disabled";
++};
++
++/* ============================================================
++ * 两个 2.5G RTL8125 走 PCIe（参考 leux 的 H88K U-Boot 适配笔记）
++ *   pcie2x1l1 ETH1 -> reset GPIO4_A2 高有效
++ *   pcie2x1l2 ETH2 -> reset GPIO4_A5 高有效
++ * ============================================================ */
++&combphy1_ps {
++	status = "okay";
++};
++
++&combphy2_psu {
++	status = "okay";
++};
++
++&pcie2x1l1 {
++	reset-gpios = <&gpio4 RK_PA2 GPIO_ACTIVE_HIGH>;
++	status = "okay";
++};
++&combphy0_ps {
++	status = "okay";
++};
++
++&pcie2x1l2 {
++	reset-gpios = <&gpio4 RK_PA5 GPIO_ACTIVE_HIGH>;
++	status = "okay";
++};
++
++/* ============================================================
++ * NVMe：M.2 M-Key 走 pcie3x4 + pcie30phy
++ *   reset = GPIO4_B6 高有效
++ * ============================================================ */
++&pcie30phy {
++	status = "okay";
++};
++
++&pcie3x4 {
++	reset-gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>;
++	status = "okay";
++};
+--- /dev/null
++++ b/arch/arm/dts/rk3588-hinlink-h88k-v3-u-boot.dtsi
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * HINLINK OPC-H88K V3 —— U-Boot overlay
++ *
++ * 把 eMMC / TF 卡节点标记为 pre-ram 可用，否则 SPL 阶段找不到启动介质。
++ */
++
++#include "rk3588-u-boot.dtsi"
++
++&sdhci {
++	bootph-pre-ram;
++	bootph-some-ram;
++};
++
++&sdmmc {
++	bootph-pre-ram;
++	bootph-some-ram;
++};
+--- /dev/null
++++ b/configs/hinlink-h88k-v3-rk3588_defconfig
+@@ -0,0 +1,90 @@
++CONFIG_ARM=y
++CONFIG_SKIP_LOWLEVEL_INIT=y
++CONFIG_COUNTER_FREQUENCY=24000000
++CONFIG_ARCH_ROCKCHIP=y
++CONFIG_DEFAULT_DEVICE_TREE="rockchip/rk3588-hinlink-h88k-v3"
++CONFIG_ROCKCHIP_RK3588=y
++CONFIG_ROCKCHIP_HANG_TO_BROM=y
++CONFIG_SPL_SERIAL=y
++# Conforms to upstream generic-rk3588: RK3588 needs a CONFIG_TARGET_*
++# to pull in board support code, so we reuse the EVB target.
++CONFIG_TARGET_EVB_RK3588=y
++# NOTE: do NOT set "# CONFIG_OF_UPSTREAM is not set" (generic-rk3588 has it).
++# With OF_UPSTREAM disabled u-boot looks for the board dts under arch/arm/dts/
++# and requires it to be listed in arch/arm/dts/Makefile; enabling it (default)
++# makes u-boot pick the dts from dts/upstream/src/arm64/rockchip/ automatically,
++# which is where this file lives.
++CONFIG_SYS_LOAD_ADDR=0xc00800
++CONFIG_DEBUG_UART_BASE=0xFEB50000
++CONFIG_DEBUG_UART_CLOCK=24000000
++CONFIG_DEBUG_UART=y
++CONFIG_FIT=y
++CONFIG_FIT_VERBOSE=y
++CONFIG_SPL_FIT_SIGNATURE=y
++CONFIG_SPL_LOAD_FIT=y
++# CONFIG_BOOTMETH_VBE is not set
++CONFIG_LEGACY_IMAGE_FORMAT=y
++CONFIG_OF_SYSTEM_SETUP=y
++CONFIG_DEFAULT_FDT_FILE="rockchip/rk3588-hinlink-h88k-v3.dtb"
++# CONFIG_DISPLAY_CPUINFO is not set
++CONFIG_SPL_MAX_SIZE=0x40000
++# CONFIG_SPL_RAW_IMAGE_SUPPORT is not set
++CONFIG_SPL_ATF=y
++CONFIG_CMD_MEMINFO=y
++CONFIG_CMD_MEMINFO_MAP=y
++CONFIG_CMD_GPIO=y
++CONFIG_CMD_GPT=y
++CONFIG_CMD_MISC=y
++CONFIG_CMD_MMC=y
++CONFIG_CMD_ROCKUSB=y
++CONFIG_CMD_USB_MASS_STORAGE=y
++# CONFIG_CMD_SETEXPR is not set
++CONFIG_CMD_RNG=y
++# CONFIG_SPL_DOS_PARTITION is not set
++CONFIG_SPL_OF_CONTROL=y
++CONFIG_OF_LIVE=y
++CONFIG_OF_SPL_REMOVE_PROPS="clock-names interrupt-parent assigned-clocks assigned-clock-rates assigned-clock-parents"
++CONFIG_ENV_RELOC_GD_ENV_ADDR=y
++# ---- 网络：板载 RTL8211F(GMAC0) + 2x RTL8125(PCIe) ----
++# 注意：generic-rk3588_defconfig 原本有 CONFIG_NO_NET=y
++# （它是无网口的通用板），本板有网口，必须去掉，否则网络驱动不编译。
++CONFIG_PHYLIB=y
++CONFIG_PHY_REALTEK=y
++CONFIG_DWC_ETH_QOS=y
++CONFIG_DWC_ETH_QOS_ROCKCHIP=y
++CONFIG_DM_MDIO=y
++# ---- PCIe：2 个 RTL8125 网卡 + M.2 NVMe ----
++CONFIG_PCI=y
++CONFIG_CMD_PCI=y
++CONFIG_PCIE_DW_ROCKCHIP=y
++CONFIG_RTL8169=y
++CONFIG_CMD_NVME=y
++CONFIG_NVME_PCI=y
++CONFIG_SPL_DM_SEQ_ALIAS=y
++CONFIG_SPL_SYSCON=y
++# CONFIG_ADC is not set
++CONFIG_SPL_CLK=y
++# CONFIG_USB_FUNCTION_FASTBOOT is not set
++CONFIG_ROCKCHIP_GPIO=y
++CONFIG_MISC=y
++CONFIG_SUPPORT_EMMC_RPMB=y
++CONFIG_MMC_DW=y
++CONFIG_MMC_DW_ROCKCHIP=y
++CONFIG_MMC_SDHCI=y
++CONFIG_MMC_SDHCI_SDMA=y
++CONFIG_MMC_SDHCI_ROCKCHIP=y
++CONFIG_PHY_ROCKCHIP_INNO_USB2=y
++CONFIG_SPL_PINCTRL=y
++CONFIG_SPL_RAM=y
++CONFIG_BAUDRATE=1500000
++CONFIG_DEBUG_UART_SHIFT=2
++CONFIG_SYS_NS16550_MEM32=y
++CONFIG_SYSRESET=y
++CONFIG_SYSRESET_PSCI=y
++CONFIG_USB=y
++CONFIG_USB_DWC3=y
++CONFIG_USB_DWC3_GENERIC=y
++CONFIG_USB_GADGET=y
++CONFIG_USB_GADGET_DOWNLOAD=y
++CONFIG_USB_FUNCTION_ROCKUSB=y
++CONFIG_ERRNO_STR=y
+--- /dev/null
++++ b/dts/upstream/src/arm64/rockchip/rk3588-hinlink-h89k.dts
+@@ -0,0 +1,145 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * HINLINK OPC-H89K
++ *
++ * ★ U-Boot 专用板级设备树（RK3588），与内核的 rk3588-hinlink-*.dts 相互独立。
++ *   只保留 U-Boot 阶段需要的：eMMC / TF 卡 / 调试串口。
++ *
++ * ★ 不含 rk806 PMIC
++ *   RK3588 的 PMIC 由 Rockchip TPL 在 SPL 之前初始化（DDR 需要电压），
++ *   U-Boot proper 不必再配一遍。这样可以让本文件保持最小集，
++ *   避免抄错 34 路 regulator 电压。代价是 U-Boot 下读不到 PMIC。
++ *
++ * ★ 存储与串口依据（厂商 dtb / rk3588-hinlink.dtsi 实测，两者一致）
++ *     sdhci  eMMC  bus-width 8, non-removable, mmc-hs200-1_8v
++ *     sdmmc  TF 卡 bus-width 4, cd-gpios gpio0 PA4 低有效, no-mmc
++ *     uart2  调试串口 uart2m0_xfer, 1500000n8
++ *
++ * ⚠️ 未实机验证。
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/pinctrl/rockchip.h>
++#include "rk3588.dtsi"
++
++/ {
++	model = "HINLINK OPC-H89K";
++	compatible = "hinlink,h89k", "rockchip,rk3588";
++
++	aliases {
++		mmc0 = &sdhci;
++		mmc1 = &sdmmc;
++		serial2 = &uart2;
++	};
++
++	chosen {
++		stdout-path = "serial2:1500000n8";
++	};
++};
++
++/* 板载 eMMC（8 bit，不可插拔） */
++&sdhci {
++	bus-width = <8>;
++	no-sdio;
++	no-sd;
++	non-removable;
++	max-frequency = <150000000>;
++	mmc-hs200-1_8v;
++	status = "okay";
++};
++
++/* TF 卡槽（4 bit，卡检测 gpio0 PA4 低有效） */
++&sdmmc {
++	bus-width = <4>;
++	cap-mmc-highspeed;
++	cap-sd-highspeed;
++	cd-gpios = <&gpio0 RK_PA4 GPIO_ACTIVE_LOW>;
++	disable-wp;
++	no-mmc;
++	no-sdio;
++	sd-uhs-sdr104;
++	status = "okay";
++};
++
++/* 调试串口 */
++&uart2 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&uart2m0_xfer>;
++	status = "okay";
++};
++
++/* ============================================================
++ * 板载千兆网口：RTL8211F 走 GMAC0（板子只引出一个千兆口）
++ *   reset = GPIO4_B3 低有效（厂商/armbian/leux 三方一致）
++ * ============================================================ */
++&gmac0 {
++	clock_in_out = "output";
++	phy-mode = "rgmii";
++	tx_delay = <0x42>;
++	rx_delay = <0x34>;
++	snps,reset-gpio = <&gpio4 RK_PB3 GPIO_ACTIVE_LOW>;
++	snps,reset-active-low;
++	snps,reset-delays-us = <0 20000 100000>;
++
++	phy-handle = <&rgmii_phy>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&gmac0_miim>,
++		    <&gmac0_tx_bus2>,
++		    <&gmac0_rx_bus2>,
++		    <&gmac0_rgmii_clk>,
++		    <&gmac0_rgmii_bus>;
++	status = "okay";
++};
++
++&mdio0 {
++	rgmii_phy: ethernet-phy@1 {
++		compatible = "ethernet-phy-ieee802.3-c22";
++		reg = <0x1>;
++	};
++};
++
++/* gmac1 板子没引出 */
++&gmac1 {
++	status = "disabled";
++};
++
++/* ============================================================
++ * 两个 2.5G RTL8125 走 PCIe（参考 leux 的 H88K U-Boot 适配笔记）
++ *   pcie2x1l1 ETH1 -> reset GPIO4_A2 高有效
++ *   pcie2x1l2 ETH2 -> reset GPIO4_A5 高有效
++ * ============================================================ */
++&combphy1_ps {
++	status = "okay";
++};
++
++&combphy2_psu {
++	status = "okay";
++};
++
++&pcie2x1l1 {
++	reset-gpios = <&gpio4 RK_PA2 GPIO_ACTIVE_HIGH>;
++	status = "okay";
++};
++&combphy0_ps {
++	status = "okay";
++};
++
++&pcie2x1l2 {
++	reset-gpios = <&gpio4 RK_PA5 GPIO_ACTIVE_HIGH>;
++	status = "okay";
++};
++
++/* ============================================================
++ * NVMe：M.2 M-Key 走 pcie3x4 + pcie30phy
++ *   reset = GPIO4_B6 高有效
++ * ============================================================ */
++&pcie30phy {
++	status = "okay";
++};
++
++&pcie3x4 {
++	reset-gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>;
++	status = "okay";
++};
+--- /dev/null
++++ b/arch/arm/dts/rk3588-hinlink-h89k-u-boot.dtsi
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * HINLINK OPC-H89K —— U-Boot overlay
++ *
++ * 把 eMMC / TF 卡节点标记为 pre-ram 可用，否则 SPL 阶段找不到启动介质。
++ */
++
++#include "rk3588-u-boot.dtsi"
++
++&sdhci {
++	bootph-pre-ram;
++	bootph-some-ram;
++};
++
++&sdmmc {
++	bootph-pre-ram;
++	bootph-some-ram;
++};
+--- /dev/null
++++ b/configs/hinlink-h89k-rk3588_defconfig
+@@ -0,0 +1,90 @@
++CONFIG_ARM=y
++CONFIG_SKIP_LOWLEVEL_INIT=y
++CONFIG_COUNTER_FREQUENCY=24000000
++CONFIG_ARCH_ROCKCHIP=y
++CONFIG_DEFAULT_DEVICE_TREE="rockchip/rk3588-hinlink-h89k"
++CONFIG_ROCKCHIP_RK3588=y
++CONFIG_ROCKCHIP_HANG_TO_BROM=y
++CONFIG_SPL_SERIAL=y
++# Conforms to upstream generic-rk3588: RK3588 needs a CONFIG_TARGET_*
++# to pull in board support code, so we reuse the EVB target.
++CONFIG_TARGET_EVB_RK3588=y
++# NOTE: do NOT set "# CONFIG_OF_UPSTREAM is not set" (generic-rk3588 has it).
++# With OF_UPSTREAM disabled u-boot looks for the board dts under arch/arm/dts/
++# and requires it to be listed in arch/arm/dts/Makefile; enabling it (default)
++# makes u-boot pick the dts from dts/upstream/src/arm64/rockchip/ automatically,
++# which is where this file lives.
++CONFIG_SYS_LOAD_ADDR=0xc00800
++CONFIG_DEBUG_UART_BASE=0xFEB50000
++CONFIG_DEBUG_UART_CLOCK=24000000
++CONFIG_DEBUG_UART=y
++CONFIG_FIT=y
++CONFIG_FIT_VERBOSE=y
++CONFIG_SPL_FIT_SIGNATURE=y
++CONFIG_SPL_LOAD_FIT=y
++# CONFIG_BOOTMETH_VBE is not set
++CONFIG_LEGACY_IMAGE_FORMAT=y
++CONFIG_OF_SYSTEM_SETUP=y
++CONFIG_DEFAULT_FDT_FILE="rockchip/rk3588-hinlink-h89k.dtb"
++# CONFIG_DISPLAY_CPUINFO is not set
++CONFIG_SPL_MAX_SIZE=0x40000
++# CONFIG_SPL_RAW_IMAGE_SUPPORT is not set
++CONFIG_SPL_ATF=y
++CONFIG_CMD_MEMINFO=y
++CONFIG_CMD_MEMINFO_MAP=y
++CONFIG_CMD_GPIO=y
++CONFIG_CMD_GPT=y
++CONFIG_CMD_MISC=y
++CONFIG_CMD_MMC=y
++CONFIG_CMD_ROCKUSB=y
++CONFIG_CMD_USB_MASS_STORAGE=y
++# CONFIG_CMD_SETEXPR is not set
++CONFIG_CMD_RNG=y
++# CONFIG_SPL_DOS_PARTITION is not set
++CONFIG_SPL_OF_CONTROL=y
++CONFIG_OF_LIVE=y
++CONFIG_OF_SPL_REMOVE_PROPS="clock-names interrupt-parent assigned-clocks assigned-clock-rates assigned-clock-parents"
++CONFIG_ENV_RELOC_GD_ENV_ADDR=y
++# ---- 网络：板载 RTL8211F(GMAC0) + 2x RTL8125(PCIe) ----
++# 注意：generic-rk3588_defconfig 原本有 CONFIG_NO_NET=y
++# （它是无网口的通用板），本板有网口，必须去掉，否则网络驱动不编译。
++CONFIG_PHYLIB=y
++CONFIG_PHY_REALTEK=y
++CONFIG_DWC_ETH_QOS=y
++CONFIG_DWC_ETH_QOS_ROCKCHIP=y
++CONFIG_DM_MDIO=y
++# ---- PCIe：2 个 RTL8125 网卡 + M.2 NVMe ----
++CONFIG_PCI=y
++CONFIG_CMD_PCI=y
++CONFIG_PCIE_DW_ROCKCHIP=y
++CONFIG_RTL8169=y
++CONFIG_CMD_NVME=y
++CONFIG_NVME_PCI=y
++CONFIG_SPL_DM_SEQ_ALIAS=y
++CONFIG_SPL_SYSCON=y
++# CONFIG_ADC is not set
++CONFIG_SPL_CLK=y
++# CONFIG_USB_FUNCTION_FASTBOOT is not set
++CONFIG_ROCKCHIP_GPIO=y
++CONFIG_MISC=y
++CONFIG_SUPPORT_EMMC_RPMB=y
++CONFIG_MMC_DW=y
++CONFIG_MMC_DW_ROCKCHIP=y
++CONFIG_MMC_SDHCI=y
++CONFIG_MMC_SDHCI_SDMA=y
++CONFIG_MMC_SDHCI_ROCKCHIP=y
++CONFIG_PHY_ROCKCHIP_INNO_USB2=y
++CONFIG_SPL_PINCTRL=y
++CONFIG_SPL_RAM=y
++CONFIG_BAUDRATE=1500000
++CONFIG_DEBUG_UART_SHIFT=2
++CONFIG_SYS_NS16550_MEM32=y
++CONFIG_SYSRESET=y
++CONFIG_SYSRESET_PSCI=y
++CONFIG_USB=y
++CONFIG_USB_DWC3=y
++CONFIG_USB_DWC3_GENERIC=y
++CONFIG_USB_GADGET=y
++CONFIG_USB_GADGET_DOWNLOAD=y
++CONFIG_USB_FUNCTION_ROCKUSB=y
++CONFIG_ERRNO_STR=y

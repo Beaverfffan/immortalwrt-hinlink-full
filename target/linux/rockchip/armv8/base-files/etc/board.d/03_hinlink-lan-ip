@@ -1,0 +1,74 @@
+#!/bin/sh /lib/ucode/luci
+#
+#  HinLink 机型：出厂默认 LAN 网段
+#  ────────────────────────────────────────────────────────────────────────
+#  默认值：  192.168.100.0/24，网关 192.168.100.1
+#  选它的理由：绝大多数光猫 / 上级路由都是 192.168.1.0/24，出厂就用同网段
+#              会出现「WAN 侧与 LAN 侧同网段」的路由错乱，改掉省事。
+#              （默认 DHCP 池因此是 192.168.100.100 ~ 192.168.100.249，
+#                即 /etc/config/dhcp 里 dhcp.lan 的 start=100 / limit=150，
+#                这两个是**主机位偏移**，会自动跟着网段走，无需改动。）
+#
+#  ★ 为什么写在 board.d，而不是 uci-defaults 之类的后置脚本
+#    `/bin/config_generate` 的 generate_network() 会从 board.d 产出的
+#    /etc/board.json 里读每个接口的 ipaddr / netmask：
+#
+#        json_get_vars device macaddr metric protocol ipaddr netmask vlan
+#        ...
+#        case "$1" in
+#            lan) ipad=${ipaddr:-"192.168.1.1"} ;;    # ← 没给就用上游默认
+#        esac
+#        netm=${netmask:-"255.255.255.0"}
+#        netmask2prefix prefix "$netm"
+#        ... add_list network.$1.ipaddr='$ipad/$prefix'
+#
+#    ⇒ 在这里给出 ipaddr，首次生成的 /etc/config/network 天生就是目标网段，
+#      不需要任何「启动后再改」的动作 ⇒ 也就不会在 sysupgrade 时把用户
+#      自己改过的 IP 又覆盖回去。
+#
+#  ★ 官方先例（同样的写法）：
+#      target/linux/qoriq/base-files/etc/board.d/02_network:14
+#          ucidef_set_interface "$device" device "$device" protocol static \
+#                                ipaddr "10.0.${offset}.1" netmask 255.255.255.0
+#      target/linux/bmips/bcm63268/.../02_network:21 / ramips:202 也有同型用法。
+#
+#  ★ 执行时机（为什么和 02_network 不打架）
+#    preinit 阶段 /bin/board_detect 会：
+#        for a in $(ls /etc/board.d/*); do [ -s "$a" ] || continue; (. "$a"); done
+#    每个脚本在**子 shell** 里跑，共用同一个 $CFG 临时文件，且每个脚本都是
+#    board_config_update（`json_load` 读入已有内容）→ 修改 → board_config_flush
+#    （`json_dump -o` 写回）⇒ 这就是 OpenWrt board.d 的累加机制。
+#    本文件按字典序排在 02_network **之后**，所以此时 `network.lan` 对象
+#    已经由 02_network 建好（device / protocol），本文件只往里补两个字段。
+#
+#    另外 board_detect 只在 /etc/board-base.json **不存在**时才遍历 board.d
+#    ⇒ 升级（保留配置）时本文件不会重跑。
+#    ⚠️ 反过来也意味着：**已经跑过旧固件、带着 192.168.1.1 的机器，
+#       保留配置刷这版固件不会自动变成 100.1** —— 想恢复出厂网段需
+#       「不保留配置」刷机（或手动 uci set）。
+#
+#  ★ 只作用于 HinLink：官方其它 rockchip 机型（radxa / friendlyarm 等）
+#    的 board_name 不匹配下面的 case，保持上游默认 192.168.1.1。
+#
+#  ★ 想把出厂默认改成别的网段：只改下面这两行即可。
+#  ────────────────────────────────────────────────────────────────────────
+
+. /lib/functions/uci-defaults.sh
+. /lib/functions/system.sh
+
+hinlink_lan_ip='192.168.100.1'
+hinlink_lan_netmask='255.255.255.0'
+
+board_config_update
+
+case "$(board_name)" in
+	hinlink,*|hlink,*|linkstar,*)
+		ucidef_set_interface "lan" \
+			ipaddr "$hinlink_lan_ip" \
+			netmask "$hinlink_lan_netmask"
+		;;
+esac
+
+board_config_flush
+
+exit 0

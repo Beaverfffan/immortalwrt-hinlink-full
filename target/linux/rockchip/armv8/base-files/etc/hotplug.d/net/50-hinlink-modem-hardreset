@@ -1,0 +1,39 @@
+#!/bin/sh
+#
+# HinLink 5G 模组 —— 模组网卡（usb0 / wwan0 / cdc-wdm 类）的上下线 -> 记进日志
+#
+# 内核为网络设备发 uevent（subsystem=net），procd 转发到
+# /etc/hotplug.d/net/。实测（H69K + FM160，cdc_ether 网卡）：
+#
+#   ACTION=remove INTERFACE=usb0 DEVPATH=.../6-1:1.4/net/usb0
+#   ACTION=add    INTERFACE=usb0 DEVPATH=.../6-1:1.4/net/usb0
+#
+# ★ 必须过滤，否则 br-lan / eth0 / wlan0 的每次增删都会写进 5G 日志：
+#   只认「设备路径在 USB 总线上」的网卡（DEVPATH 里含 /usb 段），
+#   这样 RTL8125 的 ethX、GMAC、桥、无线都不会误入。
+#
+# 注：这不是「挂载」—— 网络设备不需要 mount。这里的 add/remove 就是
+#     内核创建 / 销毁 usb0 这个 netdev 的时刻，等价于「网卡上线/下线」。
+#     真正需要 mount 的是块设备（SD 卡/U 盘），那属于 block 子系统，
+#     与 5G 模组无关，不在这里记。
+
+case "$ACTION" in add|remove) ;; *) exit 0 ;; esac
+
+# 只认模组网卡的命名（cdc_ether -> usb0；QMI/MBIM -> wwan0），
+# 再叠加 DEVPATH 的 USB 总线检查，双保险。
+case "$INTERFACE" in
+	usb*|wwan*|cdc*) ;;
+	*) exit 0 ;;
+esac
+
+case "$DEVPATH" in
+	*usb*) ;;
+	*) exit 0 ;;
+esac
+
+case "$ACTION" in
+	add)    /usr/libexec/hinlink-modem-hardreset log-add OK   "网卡上线：$INTERFACE" ;;
+	remove) /usr/libexec/hinlink-modem-hardreset log-add WARN "网卡下线：$INTERFACE" ;;
+esac
+
+exit 0

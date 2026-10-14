@@ -1,0 +1,736 @@
+#!/bin/sh
+#
+# HinLink 5G 模组控制 —— 核心实现（CLI + LuCI 共用）
+#
+# ============================ 机理 ============================
+# 各机型的 5G「复位 / 使能」脚在 DTS 里交给了 rfkill-gpio，
+# 内核会在 /sys/class/rfkill/ 下建一个 type=wwan 的设备。
+# 它的 state 属性是 DEVICE_ATTR_RW（6.18 net/rfkill/core.c），可写：
+#
+#   echo 0 > /sys/class/rfkill/rfkillN/state   # set_block(true)
+#        -> rfkill_gpio_set_power(blocked = 1)
+#        -> gpiod_set_value(reset_gpio, 0)      = 复位有效
+#   echo 1 > /sys/class/rfkill/rfkillN/state   # set_block(false)
+#        -> gpiod_set_value(reset_gpio, 1)      = 复位释放
+#
+# 所以「0 -> 等一会儿 -> 1」就是一次完整的硬复位脉冲。
+# ★ 不需要装 rfkill 命令（纯 sysfs，只要 root / CAP_NET_ADMIN）。
+#
+# 详见 docs/HARDWARE.md §四。
+#
+# ============================ 子命令 ============================
+#   status        人类可读的状态（CLI 默认）
+#   status-json   状态 JSON（rpcd / LuCI 用）
+#   reset         软复位：拉复位 -> 等 -> 释放 -> 等模组启动
+#   power-off     只拉复位 / 断电（保持）
+#   power-on      只释放 / 上电
+#   usb-reset     只在 USB 层重新枚举模组（不做 pin 复位）
+#
+#   log [N]       打印最近 N 行日志（默认 100）
+#   log-json [N]  日志 JSON（rpcd / LuCI 用）
+#   log-clear     清空日志文件
+#   log-add L msg 追加一条（L = INFO|OK|WARN|ERROR；供 hotplug / init.d 复用）
+#
+#   usb-probe <DEVPATH> [vid:pid]   hotplug 的 usb add 事件调用（后台跑）：
+#                                  轮询等结构判据成立 -> 判「是不是模组」-> 记日志
+#   usb-gone  <DEVPATH> [vid:pid]   hotplug 的 usb remove 事件调用：比对状态
+#                                  文件 -> 判「掉的是不是模组」-> 记日志
+#
+# ============================ 日志 ============================
+# 两路同时写：
+#   1) logger -t hinlink-modem-hardreset   -> syslog（64 KB 环形缓冲，会被别的服务刷掉，
+#                                   但 logread / 远程 syslog 能立刻看到）
+#   2) /etc/hinlink-modem-hardreset.log    -> 持久文件（本命令默认就是读它）
+# 用文件而不是只靠 syslog 的原因：dnsmasq / netifd 之类刷得太快，
+# 模组掉线这种「几分钟前发生」的事件在 logread 里常常已经滚没了。
+#
+# 文件超过 log_max_lines 会自动轮转（只留后半），避免吃满 overlay。
+#
+# 时序取 自 UCI（/etc/config/hinlink-modem-hardreset），环境变量可临时覆盖：
+#   HINLINK_MODEM_HOLD_MS     复位保持时长（默认 300 ms）
+#   HINLINK_MODEM_BOOT_WAIT   释放后等启动（默认 2 s）
+#   HINLINK_MODEM_LOG_FILE    日志文件路径（默认 /etc/hinlink-modem-hardreset.log）
+#   HINLINK_MODEM_LOG_MAX     日志最大行数（默认 300）
+#   HINLINK_MODEM_USB_ALL     1 = 不做模组识别，任何非 root-hub 的 USB 设备
+#                             插拔都记一条（排查用；默认 0）
+#
+
+CFG_SECTION="hinlink-modem-hardreset.modem"
+
+# 日志默认路径（可被 UCI 的 log_file / 环境变量覆盖，见文件头）
+LOG_FILE_DEFAULT="/etc/hinlink-modem-hardreset.log"
+
+# ------------------------------------------------------------------ 配置
+
+cfg_get() {
+	# $1 = 键名  $2 = 默认值  $3 = 环境变量名
+	eval "_env=\${$3}"
+	if [ -n "$_env" ]; then
+		printf '%s' "$_env"
+		return
+	fi
+	_v="$(uci -q get "$CFG_SECTION.$1" 2>/dev/null)"
+	[ -n "$_v" ] && printf '%s' "$_v" || printf '%s' "$2"
+}
+
+load_cfg() {
+	HOLD_MS="$(cfg_get hold_ms 300 HINLINK_MODEM_HOLD_MS)"
+	BOOT_WAIT="$(cfg_get boot_wait 2 HINLINK_MODEM_BOOT_WAIT)"
+	case "$HOLD_MS" in ''|*[!0-9]*) HOLD_MS=300 ;; esac
+	case "$BOOT_WAIT" in ''|*[!0-9]*) BOOT_WAIT=2 ;; esac
+
+	LOG_FILE="$(cfg_get log_file '' HINLINK_MODEM_LOG_FILE)"
+	[ -n "$LOG_FILE" ] || LOG_FILE="$LOG_FILE_DEFAULT"
+	LOG_MAX="$(cfg_get log_max_lines 300 HINLINK_MODEM_LOG_MAX)"
+	case "$LOG_MAX" in ''|*[!0-9]*) LOG_MAX=300 ;; esac
+	[ "$LOG_MAX" -ge 20 ] || LOG_MAX=20
+
+	# 无脑通配模式（不做模组识别）—— 见「USB 侧」段的说明
+	USB_ALL="$(cfg_get usb_all 0 HINLINK_MODEM_USB_ALL)"
+	case "$USB_ALL" in 1|true|yes|on) USB_ALL=1 ;; *) USB_ALL=0 ;; esac
+}
+
+# ------------------------------------------------------------------ helper
+
+json_escape() {
+	# 够用的转义：反斜杠、双引号，并去掉控制字符
+	printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037'
+}
+
+find_wwan_rfkill() {
+	local d t
+	for d in /sys/class/rfkill/rfkill*; do
+		[ -d "$d" ] || continue
+		t="$(cat "$d/type" 2>/dev/null)"
+		[ "$t" = "wwan" ] && { echo "${d##*/}"; return 0; }
+	done
+	return 1
+}
+
+rfkill_state_path() {
+	local dev
+	dev="$(find_wwan_rfkill)" || return 1
+	echo "/sys/class/rfkill/$dev/state"
+}
+
+set_rfkill() {
+	local val="$1" p
+	p="$(rfkill_state_path)" || {
+		echo "hinlink-modem-hardreset: 没有 type=wwan 的 rfkill 设备" >&2
+		echo "  （该机型 DTS 未定义 rfkill-gpio，或内核没编 CONFIG_RFKILL_GPIO）" >&2
+		return 1
+	}
+	echo "$val" > "$p" 2>/dev/null || {
+		echo "hinlink-modem-hardreset: 写 $p 失败（需要 root / CAP_NET_ADMIN）" >&2
+		return 1
+	}
+	return 0
+}
+
+msleep() {
+	if command -v usleep >/dev/null 2>&1; then
+		usleep "$(( $1 * 1000 ))"
+	else
+		sleep 1
+	fi
+}
+
+# ------------------------------------------------------------------ 日志
+
+log_target() {
+	printf '%s' "${LOG_FILE:-$LOG_FILE_DEFAULT}"
+}
+
+# mlog <LEVEL> <msg...>
+#   LEVEL 只是显示用（INFO / OK / WARN / ERROR），不做过滤。
+#   写 syslog + 持久文件；文件超限则轮转（只留后半）。
+mlog() {
+	local lvl="$1"; shift
+	local ts line f n
+	[ -n "$*" ] || return 0
+
+	ts="$(date '+%Y-%m-%d %H:%M:%S')"
+	line="$ts [$lvl] $*"
+
+	# ① syslog：掉电即失，但能立刻被 logread / 远程 syslog 看到
+	logger -t hinlink-modem-hardreset "$lvl: $*" 2>/dev/null
+
+	# ② 持久文件
+	f="$(log_target)"
+	case "$f" in ''|/) return 0 ;; esac
+	[ -d "$(dirname "$f")" ] || return 0
+	printf '%s\n' "$line" >> "$f" 2>/dev/null || return 0
+
+	# 轮转
+	case "${LOG_MAX:-300}" in ''|*[!0-9]*) LOG_MAX=300 ;; esac
+	n="$(wc -l < "$f" 2>/dev/null)"
+	case "$n" in ''|*[!0-9]*) return 0 ;; esac
+	if [ "$n" -gt "$LOG_MAX" ]; then
+		tail -n "$(( LOG_MAX / 2 ))" "$f" > "$f.tmp" 2>/dev/null \
+			&& mv "$f.tmp" "$f" 2>/dev/null
+		printf '%s [INFO] 日志超过 %s 行，已轮转（只保留最近 %s 行）\n' \
+			"$ts" "$LOG_MAX" "$(( LOG_MAX / 2 ))" >> "$f" 2>/dev/null
+	fi
+	return 0
+}
+
+# 供 hotplug / init.d 追加一条：log-add [LEVEL] <msg...>
+log_add() {
+	local lvl=INFO
+	case "$1" in
+		INFO|OK|WARN|ERROR) lvl="$1"; shift ;;
+	esac
+	mlog "$lvl" "$*"
+}
+
+show_log() {
+	local n="${1:-100}" f
+	case "$n" in ''|*[!0-9]*) n=100 ;; esac
+	f="$(log_target)"
+	if [ -s "$f" ]; then
+		tail -n "$n" "$f"
+		return 0
+	fi
+	echo "（暂无记录 —— 文件 $f 还不存在或为空）"
+	echo "  下面几种情况会写日志："
+	echo "    · 执行 reset / power-off / power-on / usb-reset"
+	echo "    · 开机时 /etc/init.d/hinlink-modem-hardreset 的检查"
+	echo "    · 模组 USB 接入 / 断开（hotplug 自动捕获，无需人工操作）"
+	return 0
+}
+
+log_json() {
+	local n="${1:-100}" f total first=1 line
+	case "$n" in ''|*[!0-9]*) n=100 ;; esac
+	f="$(log_target)"
+	total=0
+	[ -s "$f" ] && total="$(wc -l < "$f" 2>/dev/null)"
+	case "$total" in ''|*[!0-9]*) total=0 ;; esac
+
+	printf '{"total":%s,"showing":%s,"max_lines":%s,"file":"%s","entries":[' \
+		"$total" "$n" "${LOG_MAX:-300}" "$(json_escape "$f")"
+
+	if [ -s "$f" ]; then
+		# 逐行转义；`first` 与 printf 同在管道子 shell 里，逻辑自洽
+		tail -n "$n" "$f" | while IFS= read -r line; do
+			if [ "$first" = 1 ]; then first=0; else printf ','; fi
+			printf '"%s"' "$(json_escape "$line")"
+		done
+	fi
+	printf ']}\n'
+}
+
+log_clear() {
+	local f
+	f="$(log_target)"
+	if : > "$f" 2>/dev/null; then
+		mlog INFO "日志已由用户清空"
+		echo "已清空 $f"
+		return 0
+	fi
+	echo "清空 $f 失败" >&2
+	return 1
+}
+
+# ------------------------------------------------------------------ 就绪等待
+
+# wait-tty [秒] [quiet] —— 等 /dev/ttyUSB* 出现；超时则告警。
+#
+# ★ 为什么现在还需要它：hotplug 的 tty 子系统事件（/etc/hotplug.d/tty/）
+#   已经能逐口记「串口上线 / 串口下线」，所以正常情况下**不需要**它再来
+#   报一遍「串口就绪」。它剩下的唯一价值是**兜底**：万一 tty 事件没到
+#   （子系统没分发 / 驱动没 bind），60 秒后给一条明确的 WARN。
+#   ⇒ 由 usb hotplug 带 `quiet` 调用：成功时闭嘴，失败时才说话。
+#
+# 机理（为什么「USB 上线」与「串口就绪」是两件事）：
+#   hotplug 的 usb add 事件只说明「USB 设备枚举完成」，
+#   而 /dev/ttyUSB0-3 是 usb-serial **option 驱动绑定接口层**之后才生成的
+#   （见 dmesg 的 "option 4-1:1.0: GSM modem (1-port) converter detected"）。
+wait_tty() {
+	local timeout="${1:-60}" quiet="${2:-}" i=0 t0 tty n
+	case "$timeout" in ''|*[!0-9]*) timeout=60 ;; esac
+	t0="$(date +%s)"
+
+	while [ "$i" -lt "$timeout" ]; do
+		[ -e /dev/ttyUSB0 ] && break
+		sleep 1
+		i=$((i + 1))
+	done
+
+	if [ -e /dev/ttyUSB0 ]; then
+		[ "$quiet" = "quiet" ] && return 0
+		tty="$(ls /dev/ttyUSB* 2>/dev/null | tr '\n' ' ')"
+		n="$(ls /dev/ttyUSB* 2>/dev/null | wc -l)"
+		mlog OK "串口就绪：${tty}（共 ${n} 个，用时 $(( $(date +%s) - t0 ))s）"
+	else
+		mlog WARN "串口 ${timeout}s 内未出现（查 usb-serial-option 是否绑定 / 模组是否停在非 AT 模式）"
+	fi
+	return 0
+}
+
+# ------------------------------------------------------------------ USB 侧
+
+# ★★ 模组识别：不看 VID，看「接口结构」（2026-10-14 重写）
+#
+# 旧做法是一份 13 个厂家的 VID 白名单。问题是换别家模组整条链路就失灵：
+# 日志里不会出现「模组上线 / 下线」，「仅 USB 重新枚举」按钮直接报找不到，
+# 而这些恰恰是排查时唯一想看的东西。
+#
+# 新判据问的是「这个 USB 设备**变成了什么**」，而不是「它是谁」：
+#
+#   ① 导出了模组类字符口 —— option 的 ttyUSB*、cdc_acm 的 ttyACM*、
+#      qmi_wwan 的 cdc-wdm*（在 usbmisc/ 下）；
+#   ② 或导出了 USB 网卡，**且**该设备同时有 vendor-specific(0xff) 接口
+#      —— 纯 ECM/MBIM/RNDIS 形态的模组走这条（它们照样带 0xff 的 AT 口）。
+#
+# 为什么对任何厂家都成立：4G/5G 模组不管谁造的，都只能靠**标准**驱动工作
+# （option / qmi_wwan / cdc_mbim / cdc_ether / cdc_acm / rndis_host …），
+# 这些驱动在内核里生成的节点名是固定的。反过来：
+#   U 盘（只有 block）、键盘鼠标（HID）、HUB（类 0x09，无这些子节点）、
+#   普通 USB 网卡（r8152 只有 net，没有 0xff 接口）—— 都不命中。
+#
+# 实测（H69K + FM160，2026-10-14）：
+#   6-1  2cb7:0105  ttys=4 nets=1 ff=4   ← 命中①，接口驱动 option/cdc_ether
+#   usb1..usb6 1d6b:*  ttys=0 nets=0 ff=0  ← root hub，不命中
+#
+# ★ 时序要点（决定了为什么必须延迟判定）：
+#   hotplug 的**设备级** add 事件发出时，接口目录已经存在
+#   （usb_set_configuration 里逐接口 device_add），但 ttyUSB* 还要等
+#   option 驱动 probe 之后才出现 ⇒ **事件当下判定会漏**。
+#   所以 add 走 usb_probe() 轮询等待，最多 USB_PROBE_WAIT 秒。
+#
+# UCI modem.usb_all=1 可退化成「无脑通配」：任何非 root-hub 的 USB 设备插拔
+# 都记一条，完全不判断。默认关闭。
+
+# 已知厂家的 VID —— **不再是主判据**，只作兜底（模组停在 U 盘模式 / 驱动没
+# bind 时结构判据不成立）。新增模组不必再往这里加。
+MODEM_VIDS="2c7c 2cb7 2dee 0e8d 05c6 19d2 12d1 1bc7 0408 413c 0bdb 1199 03f0"
+
+# 记住「上次判成模组的是哪条 USB 路径」，供 remove 事件比对
+# （remove 时 /sys 下已查不到设备，只能靠这个）
+USB_STATE_FILE="/tmp/hinlink-modem.usb"
+
+# 轮询等待上限（秒）。ttyUSB* 是 option 驱动 probe 后才出现的，必须等。
+USB_PROBE_WAIT=10
+
+count_items() {
+	[ -n "$1" ] && printf '%s\n' "$1" | wc -l || echo 0
+}
+
+# 该 USB 设备导出的「模组类字符口」：ttyUSB* / ttyACM* / cdc-wdm*
+dev_modem_ports() {
+	ls -d "$1"/*/ttyUSB* "$1"/*/ttyACM* \
+	      "$1"/*/cdc-wdm* "$1"/*/usbmisc/cdc-wdm* 2>/dev/null
+}
+
+# 该 USB 设备导出的网卡
+dev_net_ifaces() {
+	ls -d "$1"/*/net/* 2>/dev/null
+}
+
+# 该 USB 设备是否有 vendor-specific(0xff) 接口
+dev_has_vendor_iface() {
+	local f
+	for f in "$1"/*/bInterfaceClass; do
+		[ -r "$f" ] || continue
+		[ "$(cat "$f" 2>/dev/null)" = "ff" ] && return 0
+	done
+	return 1
+}
+
+# 该设备是不是主机控制器自己的 root hub（1d6b:xxxx）
+dev_is_root_hub() {
+	[ "$(cat "$1/idVendor" 2>/dev/null | tr 'A-Z' 'a-z')" = "1d6b" ]
+}
+
+# ★ 主判据
+is_modem_dev() {
+	[ -n "$(dev_modem_ports "$1")" ] && return 0
+	if [ -n "$(dev_net_ifaces "$1")" ] && dev_has_vendor_iface "$1"; then
+		return 0
+	fi
+	return 1
+}
+
+# 判成模组的依据（写日志 / 状态页用）
+modem_reason() {
+	local p n
+	p="$(dev_modem_ports "$1")"
+	if [ -n "$p" ]; then
+		printf '字符口 %s 个' "$(count_items "$p")"
+		return 0
+	fi
+	n="$(dev_net_ifaces "$1")"
+	if [ -n "$n" ]; then
+		printf 'USB 网卡 %s 个 + 0xff 接口' "$(count_items "$n")"
+		return 0
+	fi
+	printf '—'
+}
+
+# 该设备各接口绑定的驱动名（去重，供状态页展示）
+dev_drivers() {
+	local x
+	for x in "$1"/*/driver; do
+		[ -e "$x" ] || continue
+		basename "$(readlink -f "$x" 2>/dev/null)" 2>/dev/null
+	done | sort -u | tr '\n' ' '
+}
+
+# 输出一行：「<sysfs路径> <来源>」；来源 = structure | vid | wildcard
+find_modem_usb_ex() {
+	local d v
+
+	# ① 结构判据（首选，覆盖任意厂家）
+	for d in /sys/bus/usb/devices/*; do
+		[ -f "$d/idVendor" ] || continue
+		[ -f "$d/busnum" ] || continue          # 只要设备节点，不要接口(:x.y)
+		dev_is_root_hub "$d" && continue
+		is_modem_dev "$d" && { echo "$d structure"; return 0; }
+	done
+
+	# ② 已知 VID 兜底（U 盘模式 / 驱动未 bind 时）
+	for d in /sys/bus/usb/devices/*; do
+		[ -f "$d/idVendor" ] || continue
+		[ -f "$d/busnum" ] || continue
+		v="$(cat "$d/idVendor" 2>/dev/null | tr 'A-Z' 'a-z')"
+		for w in $MODEM_VIDS; do
+			[ "$v" = "$w" ] && { echo "$d vid"; return 0; }
+		done
+	done
+
+	# ③ 无脑通配（UCI usb_all=1）：任何非 root-hub 的 USB 设备
+	[ "${USB_ALL:-0}" = "1" ] || return 1
+	for d in /sys/bus/usb/devices/*; do
+		[ -f "$d/idVendor" ] || continue
+		[ -f "$d/busnum" ] || continue
+		dev_is_root_hub "$d" && continue
+		echo "$d wildcard"; return 0
+	done
+	return 1
+}
+
+# 兼容旧调用：只要路径
+find_modem_usb() {
+	local out
+	out="$(find_modem_usb_ex)" || return 1
+	[ -n "$out" ] || return 1
+	printf '%s' "${out%% *}"
+}
+
+match_label() {
+	case "$1" in
+		structure) echo "结构判据" ;;
+		vid)       echo "已知 VID" ;;
+		wildcard)  echo "通配（usb_all）" ;;
+		*)         echo "—" ;;
+	esac
+}
+
+usb_state_add() {
+	local dpath="$1" id="$2" tmp="${USB_STATE_FILE}.tmp"
+	{ awk -v k="$dpath" '$1 != k' "$USB_STATE_FILE" 2>/dev/null; \
+	  printf '%s %s %s\n' "$dpath" "$id" "$(date +%s)"; } > "$tmp" 2>/dev/null \
+		&& mv "$tmp" "$USB_STATE_FILE" 2>/dev/null
+	return 0
+}
+
+usb_state_del() {
+	local dpath="$1" tmp="${USB_STATE_FILE}.tmp"
+	[ -f "$USB_STATE_FILE" ] || return 1
+	grep -q "^${dpath} " "$USB_STATE_FILE" 2>/dev/null || return 1
+	awk -v k="$dpath" '$1 != k' "$USB_STATE_FILE" > "$tmp" 2>/dev/null \
+		&& mv "$tmp" "$USB_STATE_FILE" 2>/dev/null
+	return 0
+}
+
+# usb-probe <DEVPATH> [vid:pid] —— hotplug 的 usb add 事件**后台**调用
+usb_probe() {
+	local dpath="$1" id="$2" d i=0 r n
+	[ -n "$dpath" ] || return 0
+	d="/sys$dpath"
+	[ -d "$d" ] || return 0
+
+	# 轮询等结构判据成立（ttyUSB* 要等 option 驱动 probe）
+	while [ "$i" -lt "$USB_PROBE_WAIT" ]; do
+		[ -d "$d" ] || return 0           # 等的过程里被拔走了
+		is_modem_dev "$d" && break
+		sleep 1
+		i=$((i + 1))
+	done
+
+	if is_modem_dev "$d"; then
+		r="$(modem_reason "$d")"
+		n="$(count_items "$(dev_modem_ports "$d")")"
+		mlog OK "模组上线：${id:-?}（${dpath##*/}，${r}，等了 ${i}s）"
+		usb_state_add "$dpath" "${id:-?}"
+		# 走「网卡 + 0xff」路径时没有 AT 口，再等一次串口做兜底；
+		# 走「字符口」路径说明串口已经在，不必再等。
+		if [ "$n" -eq 0 ] && command -v start-stop-daemon >/dev/null 2>&1; then
+			start-stop-daemon -S -q -b -x "$0" -- wait-tty 30 quiet
+		fi
+		return 0
+	fi
+
+	if [ "${USB_ALL:-0}" = "1" ]; then
+		mlog OK "USB 设备上线：${id:-?}（${dpath##*/}，通配模式，未做模组识别）"
+		usb_state_add "$dpath" "${id:-?}"
+	else
+		mlog INFO "USB 设备上线但未判为模组：${id:-?}（${dpath##*/}，没导出字符口/模组网卡）"
+	fi
+	return 0
+}
+
+# usb-gone <DEVPATH> [vid:pid] —— hotplug 的 usb remove 事件调用
+#
+# remove 时 /sys 下已查不到设备，判不了结构 ⇒ 用 add 时记下的状态文件比对；
+# 再兜一层已知 VID（防 add 的轮询还没跑完就被拔）。
+usb_gone() {
+	local dpath="$1" id="$2" vid
+	[ -n "$dpath" ] || return 0
+	vid="${id%%:*}"
+
+	if usb_state_del "$dpath"; then
+		mlog WARN "模组下线：${id:-?}（掉线 / 正在被复位）"
+		return 0
+	fi
+
+	case " $MODEM_VIDS " in
+		*" $vid "*) mlog WARN "模组下线：${id:-?}（掉线 / 正在被复位）"; return 0 ;;
+	esac
+
+	[ "${USB_ALL:-0}" = "1" ] && mlog WARN "USB 设备下线：${id:-?}（通配模式）"
+	return 0
+}
+
+
+usb_reset() {
+	local d name vid pid
+	d="$(find_modem_usb)" || {
+		echo "USB 侧：没找到像模组的 USB 设备"
+		echo "  判据：导出了 ttyUSB*/cdc-wdm*，或有 USB 网卡 + vendor-specific(0xff) 接口"
+		mlog WARN "usb-reset: 未找到模组 USB 设备（结构判据不成立；若确为未知模组，可开 usb_all=1 通配排查）"
+		return 1
+	}
+	name="${d##*/}"
+	vid="$(cat "$d/idVendor" 2>/dev/null)"
+	pid="$(cat "$d/idProduct" 2>/dev/null)"
+	echo "USB 侧：重新枚举 $name ($vid:$pid)"
+	mlog INFO "usb-reset: 目标 $name ($vid:$pid)"
+
+	# 优先用 usbutils 带的 usbreset（USBDEVFS_RESET ioctl，真正 reset 端口）
+	if command -v usbreset >/dev/null 2>&1; then
+		if usbreset "$vid:$pid" >/dev/null 2>&1; then
+			echo "  usbreset $vid:$pid 成功"
+			mlog OK "usb-reset: usbreset $vid:$pid 成功"
+			return 0
+		fi
+		echo "  usbreset 失败，退回 authorized 开关"
+		mlog WARN "usb-reset: usbreset 失败，改用 authorized 开关"
+	fi
+
+	# 退回：authorized 0 -> 1（让内核重新枚举该设备）
+	if [ -w "$d/authorized" ]; then
+		echo 0 > "$d/authorized" 2>/dev/null || {
+			echo "  写 $d/authorized 失败" >&2
+			mlog ERROR "usb-reset: 写 $d/authorized=0 失败"
+			return 1; }
+		sleep 1
+		echo 1 > "$d/authorized" 2>/dev/null || {
+			echo "  写 $d/authorized（恢复）失败" >&2
+			mlog ERROR "usb-reset: 写 authorized=1 失败（设备可能停在未授权状态！）"
+			return 1; }
+		echo "  authorized 0 -> 1 完成"
+		mlog OK "usb-reset: authorized 0 -> 1 完成"
+		return 0
+	fi
+	echo "  该设备没有 authorized 节点，无法 USB 复位" >&2
+	mlog ERROR "usb-reset: 设备无 authorized 节点，无法复位"
+	return 1
+}
+
+# ------------------------------------------------------------------ status
+
+status_json() {
+	local dev="" state="" name="" type="" found=0
+	dev="$(find_wwan_rfkill)" || dev=""
+	if [ -n "$dev" ]; then
+		found=1
+		name="$(cat /sys/class/rfkill/$dev/name 2>/dev/null)"
+		type="$(cat /sys/class/rfkill/$dev/type 2>/dev/null)"
+		state="$(cat /sys/class/rfkill/$dev/state 2>/dev/null)"
+	fi
+
+	# regulator（供电级）—— 只有 H29K / H88K / H89K 有
+	local reg="" r
+	if [ -r /sys/kernel/debug/regulator/regulator_summary ]; then
+		reg="$(grep -io 'vcc3v3_modem\|modem_enable[^ ]*' \
+			/sys/kernel/debug/regulator/regulator_summary 2>/dev/null \
+			| sort -u | tr '\n' ' ')"
+	fi
+
+	# USB 侧（结构判据，不看 VID）
+	local ud="" uvid="" upid="" usrc="" udrv="" ureason="" uex
+	uex="$(find_modem_usb_ex)" || uex=""
+	if [ -n "$uex" ]; then
+		ud="${uex%% *}"; usrc="${uex##* }"
+		uvid="$(cat "$ud/idVendor" 2>/dev/null)"
+		upid="$(cat "$ud/idProduct" 2>/dev/null)"
+		udrv="$(dev_drivers "$ud")"
+		ureason="$(modem_reason "$ud")"
+	fi
+
+	printf '{'
+	printf '"rfkill_found":%s' "$found"
+	[ "$found" = 1 ] && printf ',"rfkill_dev":"%s","rfkill_name":"%s","rfkill_type":"%s","state":%s' \
+		"$(json_escape "$dev")" "$(json_escape "$name")" "$(json_escape "$type")" \
+		"${state:-0}"
+	printf ',"hold_ms":%s,"boot_wait":%s' "$HOLD_MS" "$BOOT_WAIT"
+	printf ',"regulator":"%s"' "$(json_escape "$reg")"
+	printf ',"usb_dev":"%s","usb_vid":"%s","usb_pid":"%s"' \
+		"$(json_escape "${ud##*/}")" "$(json_escape "$uvid")" "$(json_escape "$upid")"
+	printf ',"usb_match":"%s","usb_reason":"%s","usb_driver":"%s","usb_all":%s' \
+		"$(json_escape "$(match_label "$usrc")")" "$(json_escape "$ureason")" \
+		"$(json_escape "$udrv")" "${USB_ALL:-0}"
+	printf ',"usb_tty":"%s"' "$(json_escape "$(ls /dev/ttyUSB* /dev/cdc-wdm* /dev/ttyACM* 2>/dev/null | tr '\n' ' ')")"
+	printf '}'
+}
+
+status() {
+	local dev p
+
+	echo "=== rfkill（type=wwan）==="
+	dev="$(find_wwan_rfkill)" || dev=""
+	if [ -n "$dev" ]; then
+		p="/sys/class/rfkill/$dev"
+		echo "  $dev  name=$(cat $p/name 2>/dev/null)  type=$(cat $p/type 2>/dev/null)"
+		echo "        state=$(cat $p/state 2>/dev/null)  soft=$(cat $p/soft 2>/dev/null)  hard=$(cat $p/hard 2>/dev/null)"
+		echo "        （state: 1 = unblocked/工作，0 = blocked/复位）"
+	else
+		echo "  （无）—— 该机型若带 5G 模组，说明 DTS 里没定义 rfkill-gpio"
+	fi
+
+	echo "=== regulator（供电，常开）==="
+	if [ -r /sys/kernel/debug/regulator/regulator_summary ]; then
+		grep -i modem /sys/kernel/debug/regulator/regulator_summary \
+			|| echo "  （无 modem 相关 regulator —— H69K 只有一路，属正常）"
+	else
+		echo "  （debugfs 未挂载；可先 mount -t debugfs none /sys/kernel/debug）"
+	fi
+
+	echo "=== 模组 USB 枚举（结构判据，不看 VID）==="
+	if [ -d /sys/bus/usb/devices ]; then
+		local uex ud usrc
+		uex="$(find_modem_usb_ex)" || uex=""
+		if [ -n "$uex" ]; then
+			ud="${uex%% *}"; usrc="${uex##* }"
+			echo "  命中: ${ud##*/}  $(cat "$ud/idVendor" 2>/dev/null):$(cat "$ud/idProduct" 2>/dev/null)"
+			echo "        依据: $(match_label "$usrc") · $(modem_reason "$ud")"
+			echo "        驱动: $(dev_drivers "$ud")"
+		else
+			echo "  （未发现通信模组）"
+			echo "    判据：导出了 ttyUSB*/cdc-wdm*，或有 USB 网卡 + vendor-specific(0xff) 接口"
+			echo "    若确认插着模组却判不出，可临时开 usb_all=1 用通配模式排查"
+		fi
+	fi
+	local ttys
+	ttys="$(ls /dev/ttyUSB* /dev/cdc-wdm* /dev/ttyACM* 2>/dev/null | tr '\n' ' ')"
+	[ -n "$ttys" ] && echo "  字符设备: $ttys" || echo "  无 ttyUSB* / cdc-wdm* / ttyACM*"
+
+	if command -v lsusb >/dev/null 2>&1; then
+		echo "=== lsusb ==="
+		lsusb 2>/dev/null | sed 's/^/  /'
+	else
+		echo "=== lsusb ==="
+		echo "  （未安装 usbutils；本固件已内置，若缺失请重刷）"
+	fi
+
+	echo "=== 相关内核日志（尾 8 行）==="
+	dmesg 2>/dev/null | grep -iE 'rfkill|modem|qmi|option|cdc|usb [0-9]' | tail -8
+}
+
+# ------------------------------------------------------------------ 动作
+
+power_off() {
+	echo "拉复位 / 断电 ..."
+	if set_rfkill 0; then
+		mlog INFO "power-off: 已拉复位（模组进入复位 / 断电态）"
+		return 0
+	fi
+	mlog ERROR "power-off: 写 rfkill state 失败"
+	return 1
+}
+
+power_on() {
+	echo "释放复位 / 上电 ..."
+	if set_rfkill 1; then
+		mlog INFO "power-on: 已释放复位（模组进入工作态）"
+		return 0
+	fi
+	mlog ERROR "power-on: 写 rfkill state 失败"
+	return 1
+}
+
+do_reset() {
+	load_cfg
+	echo "== 软复位 5G 模组（保持 ${HOLD_MS}ms，释放后等 ${BOOT_WAIT}s）=="
+	mlog INFO "reset: 开始（hold=${HOLD_MS}ms, boot_wait=${BOOT_WAIT}s）"
+
+	local t0 t1 ud
+	t0="$(date +%s)"
+
+	power_off || { mlog ERROR "reset: 拉复位失败，已中止"; return 1; }
+	msleep "$HOLD_MS"
+	power_on  || { mlog ERROR "reset: 释放复位失败，已中止"; return 1; }
+	sleep "$BOOT_WAIT"
+
+	t1="$(date +%s)"
+	ud="$(find_modem_usb)" || ud=""
+	if [ -n "$ud" ]; then
+		mlog OK "reset: 完成，耗时 $((t1 - t0))s，模组 USB 已重新枚举（设备 ${ud##*/}）"
+	else
+		mlog WARN "reset: 完成，耗时 $((t1 - t0))s，但 ${BOOT_WAIT}s 内还没看到模组 USB（FM160 实际约需 20s，稍后再看）"
+	fi
+	echo "完成。可用 'hinlink-modem-hardreset status' 或 'dmesg | grep -i usb' 看枚举。"
+}
+
+# ------------------------------------------------------------------ main
+
+load_cfg
+
+case "$1" in
+	status)               status ;;
+	status-json|status_json) status_json ;;
+	reset)                do_reset ;;
+	# 连字符与下划线都支持：
+	#   CLI 习惯写 power-off；而 /etc/init.d/ 下走 rc.common 时
+	#   EXTRA_COMMANDS 的条目会被当成**函数名**调用，shell 函数名不能含
+	#   `-`，所以那边的命令名是 power_off —— 这里两种都收。
+	power-off|power_off)  power_off ;;
+	power-on|power_on)    power_on ;;
+	usb-reset|usb_reset)  usb_reset ;;
+	usb-probe|usb_probe)  shift; usb_probe "${1:-}" "${2:-}" ;;
+	usb-gone|usb_gone)    shift; usb_gone "${1:-}" "${2:-}" ;;
+	log)                  shift; show_log "${1:-100}" ;;
+	log-json|log_json)    shift; log_json "${1:-100}" ;;
+	log-clear|log_clear)  log_clear ;;
+	log-add|log_add)      shift; log_add "$@" ;;
+	wait-tty|wait_tty)    shift; wait_tty "${1:-60}" "${2:-}" ;;
+	"")
+		cat <<EOF
+用法: $0 {status|status-json|reset|power-off|power-on|usb-reset}
+      $0 log [N]              # 最近 N 行日志（默认 100）
+      $0 log-json [N]         # 日志 JSON
+      $0 log-clear            # 清空日志
+      $0 log-add [LEVEL] msg  # 追加一条（LEVEL: INFO|OK|WARN|ERROR）
+      $0 wait-tty [秒]        # 等 /dev/ttyUSB* 出现并记日志（默认 60）
+      $0 usb-probe DEVPATH [vid:pid]   # hotplug 用：判定并记「模组上线」
+      $0 usb-gone  DEVPATH [vid:pid]   # hotplug 用：判定并记「模组下线」
+      （power-off / power-on / usb-reset 也接受下划线写法）
+EOF
+		;;
+	*)
+		echo "未知子命令: $1" >&2
+		exit 1
+		;;
+esac

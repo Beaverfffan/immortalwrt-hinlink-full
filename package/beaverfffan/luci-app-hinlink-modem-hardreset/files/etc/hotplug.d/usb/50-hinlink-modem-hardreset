@@ -1,0 +1,62 @@
+#!/bin/sh
+#
+# HinLink 5G 模组 USB 插拔 -> 记进 hinlink-modem-hardreset 日志
+#
+# 只关心「整台设备」（DEVTYPE=usb_device）的出现与消失，不看接口层
+# （4-1:1.0 之类）；否则一次枚举会写好几行重复记录。
+#
+# ★ 2026-10-14 重构：这里**不再**做 VID 白名单匹配。
+#   白名单的毛病是换别家模组（移远 / 中移 / SIMCom / 美格 / 龙尚 …）时，
+#   「模组上线 / 下线」这条最关键的日志会整条消失 —— 而它恰恰是排查时
+#   唯一想看的东西。现在判定全部交给 /usr/libexec/hinlink-modem-hardreset 的
+#   **结构判据**：看设备有没有导出 ttyUSB*/ttyACM*/cdc-wdm*，或者有没有
+#   USB 网卡 + vendor-specific(0xff) 接口。任何厂家的 4G/5G 模组都只能靠
+#   标准驱动（option / qmi_wwan / cdc_mbim / cdc_ether …）工作，必然命中；
+#   U 盘、键鼠、HUB、普通 USB 网卡（r8152 只有 net、无 0xff 接口）不命中。
+#   完整判据与实测数据见该脚本「USB 侧」段的注释。
+#
+# ★ 为什么 add 要**后台**跑：
+#   ① 设备级 add 事件发出时接口目录虽已存在，但 ttyUSB* 还要等 option
+#      驱动 probe 才出现 ⇒ 判定必须轮询等待（见该脚本的 usb_probe()）；
+#   ② 本脚本由 /sbin/hotplug-call **顺序**调用，自己 sleep 会拖住同子系统的
+#      其它脚本（如 usb-modeswitch）。用 start-stop-daemon -b（setsid）
+#      后台化，确保 hotplug-call 退出后任务不被带走
+#      （实测 `( … ) &` 在 procd 路径下会被带走）。
+#
+# remove 是同步的：设备已经消失、/sys 下查不到结构，只能靠 add 时记下的
+# 状态文件（/tmp/hinlink-modem.usb）比对来决定「掉的是不是模组」——
+# 这个判断在 usb_gone() 内部做，不需要等待，所以不后台。
+#
+# ★ OpenWrt 没有 udev：环境变量里**没有** ID_VENDOR_ID / ID_MODEL /
+#   ID_VENDOR（那些是 udev 的 usb_id 工具补的）。这里只有内核 uevent 给的
+#   PRODUCT=<vid>/<pid>/<rev>（都是十六进制小写）与 DEVPATH —— 别照抄 udev
+#   的写法。可参考 /sys/bus/usb/devices/<dev>/uevent 的内容。
+
+[ "$DEVTYPE" = "usb_device" ] || exit 0
+case "$ACTION" in add|remove) ;; *) exit 0 ;; esac
+[ -n "$PRODUCT" ] || exit 0
+
+vid="$(printf '%s' "$PRODUCT" | cut -d/ -f1 | tr 'A-Z' 'a-z')"
+pid="$(printf '%s' "$PRODUCT" | cut -d/ -f2)"
+
+# root hub（主机控制器自己，1d6b:xxxx）不是模组，通配模式下也没人想看它
+[ "$vid" = "1d6b" ] && exit 0
+
+MODEM=/usr/libexec/hinlink-modem-hardreset
+[ -x "$MODEM" ] || exit 0
+
+case "$ACTION" in
+	add)
+		if command -v start-stop-daemon >/dev/null 2>&1; then
+			start-stop-daemon -S -q -b -x "$MODEM" -- \
+				usb-probe "$DEVPATH" "$vid:$pid"
+		else
+			( "$MODEM" usb-probe "$DEVPATH" "$vid:$pid" ) >/dev/null 2>&1 &
+		fi
+		;;
+	remove)
+		"$MODEM" usb-gone "$DEVPATH" "$vid:$pid"
+		;;
+esac
+
+exit 0

@@ -1,0 +1,13 @@
+{
+	"admin/network/hinlink-modem-hardreset": {
+		"title": "5G复位",
+		"order": 65,
+		"action": {
+			"type": "view",
+			"path": "hinlink-modem-hardreset"
+		},
+		"depends": {
+			"acl": [ "luci-app-hinlink-modem-hardreset" ]
+		}
+	}
+}

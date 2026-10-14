@@ -1,0 +1,68 @@
+From: HinLink adaptation for immortalwrt
+Subject: [PATCH] fbtft: read display offset from DT instead of hardcoding
+
+HinLink 的 SPI 小屏（H29K 1.14" 与 H89K）在 rotate 后显存窗口需要平移才能对上
+实际可见区。不同面板偏移量不同，且随 rotate 方向变化。
+
+原厂做法是在 fbtft-core.c 里按 rotate 硬编码 switch，但同一份内核要同时支持
+多种面板时无法区分 —— H29K 与 H89K 都是 135x240 而 rotate 不同，偏移必须按
+DT 声明的值走。
+
+改成从设备树读：
+  x-offset / y-offset        供 rotate 90 / 270 使用
+  x-offset-0 / y-offset-0    供 rotate 0 / 180 使用（可选，缺省 0）
+
+一块屏改 DTS 就能调整偏移，不必重新编译内核。
+未声明 x-offset 的屏行为与上游完全一致（偏移 0）。
+
+已验证 patch -p1 可干净应用到 Linux 6.18 的 drivers/staging/fbtft/fbtft-core.c。
+
+Signed-off-by: HinLink immortalwrt adaptation
+---
+--- a/drivers/staging/fbtft/fbtft-core.c
++++ b/drivers/staging/fbtft/fbtft-core.c
+@@ -201,6 +201,44 @@
+ static void fbtft_set_addr_win(struct fbtft_par *par, int xs, int ys, int xe,
+ 			       int ye)
+ {
++	/*
++	 * HinLink: 从 DT 读显示偏移，替代按机型硬编码的 switch。
++	 *
++	 * 旋转 90/270 与 0/180 需要两组不同的偏移：
++	 *   x-offset / y-offset        供 rotate 90 / 270 使用
++	 *   x-offset-0 / y-offset-0    供 rotate 0 / 180 使用（缺省 0）
++	 *
++	 * 未声明这些属性的屏偏移为 0，行为与上游一致。
++	 * H29K 1.14" 与 H89K 都是 135x240，偏移量同为
++	 * rotate 90/270 时 x+=40 y+=52、rotate 0/180 时 x+=52 y+=40。
++	 */
++	{
++		struct device *dev = par->info->device;
++		u32 x_off = 0, y_off = 0;
++
++		device_property_read_u32(dev, "x-offset", &x_off);
++		device_property_read_u32(dev, "y-offset", &y_off);
++
++		if (x_off || y_off) {
++			int rot = par->info->var.rotate & 0x3;
++			u32 xo, yo;
++
++			/* 90 / 270 用 x-offset/y-offset；0/180 用 -0 后缀属性 */
++			if (rot == 1 || rot == 3) {
++				xo = x_off;
++				yo = y_off;
++			} else {
++				device_property_read_u32(dev, "x-offset-0", &xo);
++				device_property_read_u32(dev, "y-offset-0", &yo);
++			}
++
++			xs += xo;
++			xe += xo;
++			ys += yo;
++			ye += yo;
++		}
++	}
++
+ 	write_reg(par, MIPI_DCS_SET_COLUMN_ADDRESS,
+ 		  (xs >> 8) & 0xFF, xs & 0xFF, (xe >> 8) & 0xFF, xe & 0xFF);
+ 

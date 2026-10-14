@@ -1,0 +1,173 @@
+
+# ===== HinLink 全机型（每机型独立，不做自适应） =====
+
+# =====================================================================
+# ★ 通用包集：LuCI + **全部可能的无线网卡驱动** + 风扇驱动
+# =====================================================================
+# 用户要求：编译全部机型时，默认带上 luci、所有可能的无线网卡驱动、风扇驱动。
+#
+# 「无线网卡」按三类总线穷举（本系列机器同时具备 M.2/PCIe、SDIO、USB）：
+#
+#   M.2 / PCIe 位： MediaTek mt7921e(mt7921/7922) / mt7925e / mt7615e
+#                  mt7915e + mt7915-firmware + mt7916-firmware
+#                  ★ 一个驱动两种芯片；固件包必须显式装（详见下面那段注释）
+#                  Realtek rtw88(8821ce/8822be/8822ce) / rtw89(8851be/8852ae/
+#                  8852be/8852ce/8922ae)
+#   SDIO 板载：    MediaTek mt7921s / mt7663s / Realtek rtw88-8822cs
+#                  Aicsemi  aic8800-sdio（H68K new / H69K / H29K / HT2 原厂）
+#                  Broadcom brcmfmac + 43455/43456 固件（H68K a 系列 AP6256）
+#   USB 口：       mt7921u / mt7663u / mt76x0u / mt76x2u / mt7601u
+#                  rtw88-8821cu/8822bu/8822cu/8821au、rtw89-8852bu
+#                  rtl8xxxu、rt2800-usb、rtl8188eu(EU)、aic8800-usb / -pcie
+#
+# 「无线」也含 5G/4G 模组的网卡驱动：
+#                  kmod-usb-net-qmi-wwan / cdc-mbim / usb-serial-option /
+#                  usb-serial-qualcomm / usb-modeswitch
+#
+# 「风扇」：kmod-hwmon-pwmfan（H69K 的 pwm-fan）+ kmod-hwmon-gpiofan +
+#          kmod-thermal / kmod-hwmon-core + fancontrol + luci-app-fancontrol
+#          （immortalwrt luci feed 自带，纯用户态，读 /sys/class/hwmon）
+#
+# ⚠️ 以上包名均已用 `make prepare-tmpinfo` 生成的 tmp/.config-package.in
+#    逐个核对过「是否有可见配置符号」，不存在/被 hide 的名字一律不入表。
+#    （历史上 kmod-aic8800s / kmod-fb-tft-* / kmod-spi-spidev /
+#      kmod-iio-adc-rk3528 / kmod-power-supply / kmod-hwmon-thermal 全是
+#      写错的名字，一次都没编译通过过 —— 之前只编了 h68k-c-usb3 才没暴露。）
+# =====================================================================
+define Device/hinlink_common
+  # --- LuCI ---
+  DEVICE_PACKAGES += luci luci-ssl luci-app-package-manager \
+	luci-i18n-base-zh-cn luci-proto-ipv6 luci-proto-ppp \
+	luci-mod-network luci-mod-status luci-mod-system luci-theme-bootstrap \
+	wpad-basic-mbedtls
+  # --- 无线网卡：M.2 / PCIe ---
+  #   ★ kmod-mt7915e 这**一个驱动同时支持 MT7915 与 MT7916 两种芯片**，
+  #     但固件是**分开的两个包**，而 kmod-mt7915e 的 DEPENDS 里
+  #     **不含任何固件包** —— 必须显式装，否则驱动能加载但没固件可用：
+  #         dmesg | grep -i "firmware load"
+  #         → Direct firmware load for mediatek/mt7916_wm.bin failed
+  #     H69K 的 M.2 / PCIe 位插 MT7916（或 MT7915）就靠这两个包。
+  #     （对照：kmod-mt7921e 的 DEPENDS 自带 kmod-mt7921-firmware，
+  #       所以那一路不用手写 —— 2026-10-12 之前 mt7915e 就是漏在这里。）
+  DEVICE_PACKAGES += kmod-mt7921e kmod-mt7925e kmod-mt7915e kmod-mt7615e \
+	kmod-mt7915-firmware kmod-mt7916-firmware \
+	kmod-rtw88-8821ce kmod-rtw88-8822be kmod-rtw88-8822ce \
+	kmod-rtw89-8851be kmod-rtw89-8852ae kmod-rtw89-8852be \
+	kmod-rtw89-8852ce kmod-rtw89-8922ae
+  # --- 无线网卡：SDIO 板载 ---
+  DEVICE_PACKAGES += kmod-mt7921s kmod-mt7663s kmod-rtw88-8822cs \
+	kmod-aic8800-sdio \
+	cypress-firmware-43455-sdio brcmfmac-nvram-43455-sdio \
+	brcmfmac-firmware-43456-sdio brcmfmac-nvram-43456-sdio
+  # --- 无线网卡：USB ---
+  DEVICE_PACKAGES += kmod-mt7921u kmod-mt7663u kmod-mt76x0u kmod-mt76x2u \
+	kmod-mt7601u kmod-rtw88-8821cu kmod-rtw88-8822bu kmod-rtw88-8822cu \
+	kmod-rtw88-8821au kmod-rtw89-8852bu kmod-rtl8xxxu kmod-rt2800-usb \
+	kmod-rtl8188eu kmod-aic8800-usb kmod-aic8800-pcie
+  # --- 无线广域网：5G / 4G 模组 ---
+  DEVICE_PACKAGES += kmod-usb-net-qmi-wwan kmod-usb-net-cdc-mbim \
+	kmod-usb-serial-option kmod-usb-serial-qualcomm usb-modeswitch
+  # --- 诊断工具 ---
+  #   usbutils：提供完整版 lsusb（`lsusb` / `lsusb -t` / `lsusb -v`）。
+  #     此前固件里没有 —— busybox 的 lsusb applet 未启用，直接
+  #     `lsusb: not found`；排查 5G 模组 / USB 网卡枚举时很不方便。
+  #     ★ usbutils 还带 usbreset（/usr/bin/usbreset），能对单个 USB 设备
+  #       做「重新枚举」级复位，正好与 hinlink-modem-hardreset 的 **pin 级**复位互补
+  #       （`/etc/init.d/hinlink-modem-hardreset usb-reset`）。
+  #     依赖链（都很小）：+libusb-1.0 +libudev → libudev-zero +usbids
+  #     （usbids 提供 /usr/share/usb.ids，没有它 lsusb 只显示 ID、无厂商名）
+  DEVICE_PACKAGES += usbutils usbids
+  # --- 风扇 ---
+  DEVICE_PACKAGES += kmod-hwmon-core kmod-thermal kmod-hwmon-pwmfan \
+	kmod-hwmon-gpiofan fancontrol luci-app-fancontrol \
+	luci-i18n-fancontrol-zh-cn
+endef
+
+
+
+define Device/hinlink_h6xk_base
+
+  $(Device/rk3568)
+
+  DEVICE_VENDOR := HINLINK
+
+  DEVICE_PACKAGES := kmod-ata-ahci-dwc kmod-r8169 wpad-basic-mbedtls
+
+endef
+
+
+# M.2 (PCIe) 无线模块机型
+
+define Device/hinlink_h6xk_m2_wifi
+
+  $(Device/hinlink_h6xk_base)
+
+  DEVICE_PACKAGES += kmod-mt7921e
+
+endef
+
+
+# 板载 SDIO 无线（AIC8800，全新机器）
+
+define Device/hinlink_h6xk_sdio_aic8800
+
+  $(Device/hinlink_h6xk_base)
+
+  DEVICE_PACKAGES += kmod-aic8800-sdio
+
+endef
+
+
+# 板载 SDIO 无线（AP6256，老机器 Broadcom brcmfmac）
+
+define Device/hinlink_h6xk_sdio_ap6256
+
+  $(Device/hinlink_h6xk_base)
+
+  DEVICE_PACKAGES += kmod-brcmfmac cypress-firmware-43455-sdio brcmfmac-nvram-43455-sdio
+
+endef
+
+
+# ===== H68K / H69K（RK3568）=====
+#
+# ★ SATA / USB3.0 二选一（用户确认，仅 2022-2023 老机器）
+#
+#   RK3568 硬件复用（rk3568.dtsi 实证）：
+#       sata0   phys = <&combphy0 PHY_TYPE_SATA>    (phy@fe820000)
+#       USB3.0  同样需要 combphy0 作 PHY_TYPE_USB3
+#       combphy 同一时刻只能是一种 PHY_TYPE  =>  SATA 与 USB3.0 互斥
+#
+#   ⇒ 老机器（68k 的 a-b / c / d）必须拆两个 target：
+#       基础版（USB3.0）：&sata0 disabled
+#       -sata 版：       &sata0 okay，USB3.0 不可用
+#
+#   ★ 该复用只涉及 2022-2023 老机器。
+#     新机 h68k-new 与 h69k 系不涉及，SATA 与 USB3.0 可同时使用。
+#   ★ 网口数量不受影响：2.5G 网卡走独立的 pcie30phy（phy@fe8c0000），
+#     与 combphy0 无关。
+#
+# ★ H69K 型号谱系（用户确认 + 厂商 dtb / fw29new 实证）
+#   H69K三网口 = 1×GMAC + 2×RTL8125 2.5G
+#       → **gmac0 disabled / gmac1 okay**（厂商 dtb 实证）
+#         ⇒ gmac1 独占 ethernet0 = eth0，2×RTL8125 = eth1/eth2
+#   H69K-mini  四网口 = 2×GMAC(gmac0+gmac1) + 2×RTL8125
+#       → 两个 GMAC 都 okay ⇒ gmac0=eth0、gmac1=eth1、RTL8125=eth2/eth3
+#   H69K-mini 即 H68K max，两者网络构成相同。
+#   原「双网口 h69k-mini」与「H69K-mini 只 3 口」都是臆造，已两次修正。
+#
+# ★ WAN 口位置（2026-10-12 按**实机** + 厂商固件确定）
+#   判据不是「几口」，而是**WAN 焊在哪颗 GMAC 上**：
+#     老一代（a / c / d 系，2022~2023）：WAN = **gmac0**
+#         · 4 口机：LAN eth1 eth2 eth3 / WAN eth0
+#         · 2 口机 a / a-usb：LAN eth1 / WAN eth0
+#     新一代（h68k-new / h69k / h69k-mini）：WAN = **gmac1**
+#         · h68k-new、h69k-mini（两个 GMAC 都开）→ gmac1 = eth1 ⇒ WAN eth1
+#         · h69k 三网口（gmac0 关掉）→ gmac1 独占 eth0 ⇒ WAN eth0
+#   厂商依据：fw23  `hinlink,opc-h69k|opc-h68k-c|opc-h68k-d` → WAN eth0
+#             fw29new `hinlink,opc-h68k` → WAN eth1 ｜ `hinlink,opc-h69k` → WAN eth0
+
+# ---- H66K：无板载网口（两个 GMAC 均 disabled）----
+# 来源 lede rk3568-opc-h66k.dts，硬件由厂商 2024 固件 dtb 实证
+# 网口：仅 PCIe 2.5G（pcie3x1 / pcie3x2 由公共 dtsi 使能）
+
