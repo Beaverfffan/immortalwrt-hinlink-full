@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * HinLink OPC-H66K
+ *
+ * HinLink 适配 for immortalwrt —— 每机型独立 DTS，不做自适应。
+ *
+ * 来源：coolsnowwolf/lede 的 rk3568-opc-h66k.dts（Copyright 2022 AmadeusGhost）
+ * 硬件实证：厂商 2024 QWRT-R24.07.07 固件 dtb（ink,opc-h66k）
+ * 蓝本：OpenWrt 主线 rk3568-hinlink-opc.dtsi
+ *
+ * ★ 硬件特征：**无板载网口**
+ *   厂商 dtb 里 gmac0(fe2a0000) 与 gmac1(fe010000) 两个 GMAC
+ *   均为 status = "disabled"，且没有 mdio/phy@0 子节点。
+ *   主线 dtsi 未覆写 gmac，故 SoC 默认 disabled —— 与厂商一致。
+ *   ⇒ 本机型通常只有一个 PCIe 2.5G 口（pcie3x1/pcie3x2 由 dtsi 使能）。
+ *
+ * ★ 注意：dtsi 里 &sata0 为 status = "okay"，
+ *   H66K 无 SATA 座，SATA 控制器虽使能但无设备，属无害冗余。
+ */
+
+/dts-v1/;
+
+#include "rk3568-hinlink-opc.dtsi"
+
+/ {
+	model = "HINLINK OPC-H66K Board";
+	compatible = "hinlink,opc-h66k", "hinlink,h66k", "rockchip,rk3568";
+
+	aliases {
+		ethernet0 = &gmac0;
+		ethernet1 = &gmac1;
+	};
+};
+
+/* 两个 GMAC 均 disabled —— 厂商 dtb 实证：无板载网口 */
+
+&gmac0 {
+	status = "disabled";
+};
+
+&gmac1 {
+	status = "disabled";
+};

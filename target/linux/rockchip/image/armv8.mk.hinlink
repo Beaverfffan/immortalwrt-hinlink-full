@@ -171,3 +171,47 @@ endef
 # 来源 lede rk3568-opc-h66k.dts，硬件由厂商 2024 固件 dtb 实证
 # 网口：仅 PCIe 2.5G（pcie3x1 / pcie3x2 由公共 dtsi 使能）
 
+define Device/hinlink_opc-h66k
+  $(Device/rk3568)
+  DEVICE_VENDOR := HINLINK
+  DEVICE_MODEL := OPC-H66K
+  DEVICE_DTS := rk3568-hinlink-h66k
+  # ★ u-boot：直接用**上游 OpenWrt 的 HINLINK 支持**（见 patches-uboot/）
+  #   上游 package/boot/uboot-rockchip/Makefile 已有本条目，defconfig 与
+  #   u-boot dts 由 patches-uboot/ 里那两个 patch 提供（源自 openwrt/main
+  #   patches/106、107）。u-boot 2026.07 的
+  #   dts/upstream/src/arm64/rockchip/ 里已自带 rk3568-hinlink-h68k.dts。
+  #   TPL/ATF 走通用 rk3568_ddr_1560MHz + bl31，不依赖具体板子。
+  #   BUILD_DEVICES 已在我们的 Makefile 补丁里登记本机型，
+  #   ⇒ make defconfig 会自动带上 CONFIG_PACKAGE_u-boot-hinlink-h66k-rk3568=y。
+  UBOOT_DEVICE_NAME := hinlink-h66k-rk3568
+  DEVICE_PACKAGES := kmod-r8169 kmod-ata-ahci-dwc
+  # ★ 通用包集（LuCI + 全无线网卡驱动 + 风扇驱动）
+  $(Device/hinlink_common)
+endef
+TARGET_DEVICES += hinlink_opc-h66k
+
+# ---- H68K 老机器：a-b（2022 双千兆，2 口） / c-d-f（2022~2023.4 四网口）----
+#
+# ★ 2026-10-12 改名 + 合并（用户要求）：
+#     机型名 = 「世代板本串」，一眼能看出哪些板本是同一台机器。
+#
+#       hinlink_opc-h68k-a-b         A/B 板（2022 双千兆 2 口）+ SATA
+#       hinlink_opc-h68k-a-b-usb     同上，USB3.0
+#       hinlink_opc-h68k-c-d-f       C/D/F 板（2022~2023.4 四网口）+ SATA
+#       hinlink_opc-h68k-c-d-f-usb   同上，USB3.0
+#
+#   合并前是 a / a-usb / c / c-usb3 / d / d-usb 六个：
+#     · c 与 d（以及 c-usb3 与 d-usb）的 DTS 归一化后 **0 行实质差异**，
+#       且 02_network 映射在当日 WAN 更正后已一致 ⇒ 合并。
+#     · a 与 a-usb 只差 `&sata0 { status }` 一行 —— RK3568 上 sata0 与 USB3.0
+#       争同一颗 combphy0，**硬件二选一，不能合并**，保留两个变体。
+#
+#   ★ 命名约定：无后缀 = SATA，-usb = USB3.0（沿用各源码惯例）
+#   ★ 网口（两组一致）：c-d-f 四口 LAN eth1 eth2 eth3 / WAN eth0
+#                       a-b 两口 LAN eth1 / WAN eth0
+#       判据是「WAN 焊在哪颗 GMAC 上」——老一代在 gmac0 ⇒ eth0。
+#   ★ compatible 里保留了旧标识（hinlink,opc-h68k-a / -c / -d / -c-usb3 …）
+#     作为次串，旧 DTB / 厂商写的 board.d 仍能匹配。
+
+# ---- H68K a-b（2022 双千兆，2 口）：板载 AP6256 SDIO WiFi + RTC ----
