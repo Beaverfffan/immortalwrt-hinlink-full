@@ -1,0 +1,463 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * HinLink OPC-H28K (RK3528)
+ *
+ * ★ 本文件已按厂商固件 QWRT-R24.07.07-rockchip-rk35xx-hinlink_h28x 更正。
+ *   厂商 dtb 已归档为 vendor-h28x.dtb（59319 B，compatible = "hlink,h28k"）。
+ *
+ * 网络构成：**双网口** —— 板载 RGMII + PCIe 千兆
+ *
+ *   网口1 = RTL8211F RGMII 千兆  -> gmac1（板载 PHY，MDIO 地址 1）
+ *   网口2 = RTL8111H  PCIe 千兆  -> pcie@fe4f0000（combphy 作 PCIe PHY）
+ *   ⇒ 依据：HinLink 官网产品页「网口1 RTL8211F RGMII 千兆 /
+ *            网口2 RTL8111H PCIe 千兆」，与厂商 dtb 的 PCIe 链路一致。
+ *
+ * ★ 为什么 DTS 里不写 pcie-eth 子节点（这曾让我误判成单口）：
+ *
+ *   厂商 dtb 里 `/pcie@fe4f0000` 下面**只有** legacy-interrupt-controller，
+ *   没有任何 pci10ec / pcie-eth 子节点，全树 pci10ec 也出现 0 次。
+ *   ——但这**不代表板上没有 PCIe 网卡**。
+ *
+ *   原因：RTL8111H 是标准 PCI 设备，PCIe 控制器一旦使能，内核 pcie 驱动
+ *   枚举 bus 时会自动发现它并绑定 r8169 驱动。DT 里**本来就不需要**
+ *   声明网卡节点，写了反而多余。
+ *
+ *   厂商 dtb 里 PCIe 硬件链路是完整使能的（这是网卡能出现的前提）：
+ *     /pcie@fe4f0000        status = "okay"
+ *                            phys = <&phy@ffdc0000>  (phy-names = "pcie-phy")
+ *                            num-lanes = <1>、max-link-speed = <2>
+ *     /phy@ffdc0000         compatible = "rockchip,rk3528-naneng-combphy"
+ *                            status = "okay"   ← combphy 作 PCIe PHY
+ *
+ *   ⇒ 所以正确做法与 RK3568 各机型一致：**不写 pcie-eth，靠 PCI 枚举**。
+ *
+ * ★ 存储（厂商 dtb + 官网「8G板载 eMMC / TF卡 x1 / 最大512GB」）：
+ *     /mmc@ffbf0000  bus-width=8  non-removable  mmc-hs200-1_8v  → 板载 eMMC
+ *     /mmc@ffc30000  bus-width=4  cap-sd-highspeed             → TF 卡
+ *
+ * ★ 无板载 WiFi —— 厂商 dtb 里 `/mmc@ffbf0000` 带 `no-sdio` 属性，
+ *   明确禁用 SDIO（RK3528 的 WiFi 走 sdio0）。本 DTS 不声明 sdio 链路，
+ *   target 也不带 kmod-aic8800s。上游 unifreq 的 rk3528-hlink-h28k.dts
+ *   同样没有任何 sdio/wifi 节点，两侧独立印证。
+ *
+ * ★ PHY 参数全部为厂商 dtb 原值（详见下方 &gmac1 段注释）。
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/pwm/pwm.h>
+#include "rk3528.dtsi"
+
+/ {
+	model = "Hinlink H28K";
+	compatible = "hlink,h28k", "hinlink,opc-h28k", "hinlink,h28k",
+		     "linkstar,h28k", "linkstar,opc-h28k", "rockchip,rk3528";
+
+	aliases {
+		/*
+		 * ★ mmc 顺序：**mmc0 = sdhci(eMMC) / mmc1 = sdmmc(TF)**
+		 *
+		 *   上游 openwrt patches-6.18/101-arm64-dts-rockchip-Add-HINLINK-H28K.patch
+		 *   里就是 `mmc0 = &sdhci; mmc1 = &sdmmc;`，本仓库对齐上游。
+		 *
+		 *   ⚠️ 厂商 QWRT 固件的 dtb 是**相反**的
+		 *      （mmc0 = /mmc@ffc30000 = sdmmc(TF)，mmc1 = sdhci(eMMC)），
+		 *      本仓库早期曾按厂商写成 TF 在前 —— 现改回上游顺序，原因：
+		 *
+		 *        board.d/02_network 用
+		 *            wan_mac=$(macaddr_generate_from_mmc_cid mmcblk0)
+		 *        从 mmcblk0 的 CID 生成稳定 MAC。mmcblk 编号跟随这里的
+		 *        mmc0/mmc1 alias。若 mmc0 = TF 卡，则 MAC 会**跟着 TF 卡走** ——
+		 *        换一张卡 MAC 就变了。mmc0 = eMMC 才能得到设备级稳定 MAC。
+		 *
+		 *   厂商固件不受影响：它的 bootargs 是
+		 *      root=PARTUUID=614e0000-0000   （按 PARTUUID，与 mmc 编号无关）
+		 *   而 u-boot 用的是它自己的 dts（patches 107），与此处无关。
+		 */
+		ethernet0 = &gmac1;
+		mmc0 = &sdhci;
+		mmc1 = &sdmmc;
+		serial0 = &uart0;
+
+		/*
+		 * ★ LED 状态别名 —— OpenWrt 的 /etc/init.d/led 靠这四个 alias
+		 *   显示固件状态（启动中 / failsafe / 正常 / 升级中）。
+		 *   对应上游 openwrt 的
+		 *   patches-6.18/121-arm64-dts-rockchip-add-led-aliases-for-HINLINK.patch，
+		 *   本仓库直接写进 DTS（本仓库以 files/ 覆盖内核树，不便叠该 patch）。
+		 *   指向 green:status（GPIO4_B7），即厂商的 green:work 那颗灯。
+		 */
+		led-boot = &led_work;
+		led-failsafe = &led_work;
+		led-running = &led_work;
+		led-upgrade = &led_work;
+	};
+
+	chosen {
+		stdout-path = "serial0:1500000n8";
+	};
+
+	keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 0>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+
+		button-boot {
+			label = "BOOT";
+			linux,code = <KEY_SETUP>;
+			press-threshold-microvolt = <0>;
+		};
+	};
+
+	/*
+	 * LED —— 引脚与极性为厂商 dtb 原值（gpio4，低有效）：
+	 *   GPIO4_B7  green:work    heartbeat   （厂商 led-work）
+	 *   GPIO4_C1  yellow:led3              （厂商 led-yellow，网卡 2）
+	 *   GPIO4_C0  blue:led4                （厂商 led-blue，网卡 1）
+	 * 厂商只声明 3 颗（官网规格写「4 颗灯，含电源指示灯」——
+	 * 第 4 颗电源灯可能是常亮硬件，不经 GPIO 控制，故 dtb 里没有）。
+	 *
+	 * ⚠️ LAN/WAN 的 netdev trigger 由 board.d/01_leds 按接口名接管，
+	 *    这里保留厂商的 heartbeat/default-on，避免两处重复触发。
+	 */
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+		pinctrl-0 = <&lan_led>, <&wan_led>, <&work_led>;
+
+		led-0 {
+			color = <LED_COLOR_ID_AMBER>;
+			function = LED_FUNCTION_LAN;
+			gpios = <&gpio4 RK_PC1 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "default-on";
+		};
+
+		led-1 {
+			color = <LED_COLOR_ID_BLUE>;
+			function = LED_FUNCTION_WAN;
+			gpios = <&gpio4 RK_PC0 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "default-on";
+		};
+
+		led_work: led-2 {
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_STATUS;
+			gpios = <&gpio4 RK_PB7 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "heartbeat";
+		};
+	};
+
+	vdd_0v9: regulator-0v9-vdd {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_0v9";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <900000>;
+		regulator-max-microvolt = <900000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_ddr: regulator-1v1-vcc-ddr {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_ddr";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1100000>;
+		regulator-max-microvolt = <1100000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc_1v8: regulator-1v8-vcc {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_1v8";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc_3v3>;
+	};
+
+	vcc_3v3: regulator-3v3-vcc {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc3v3_sd: regulator-3v3-vcc-sd {
+		compatible = "regulator-fixed";
+		gpios = <&gpio4 RK_PA1 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&sdmmc_pwren_l>;
+		regulator-name = "vcc3v3_sd";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_3v3>;
+	};
+
+	vcc5v0_sys: regulator-5v0-vcc-sys {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_sys";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+	};
+
+	vccio_sd: regulator-vccio-sd {
+		compatible = "regulator-gpio";
+		gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&sdmmc_vol_ctrl_h>;
+		regulator-name = "vccio_sd";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <3300000>;
+		states = <1800000 0x0>, <3300000 0x1>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vdd_arm: regulator-vdd-arm {
+		compatible = "pwm-regulator";
+		pwms = <&pwm1 0 5000 PWM_POLARITY_INVERTED>;
+		pwm-supply = <&vcc5v0_sys>;
+		regulator-name = "vdd_arm";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <746000>;
+		regulator-max-microvolt = <1201000>;
+		regulator-settling-time-up-us = <250>;
+		/*
+		 * ★ 厂商 dtb 原值（/vdd-cpu, regulator-ramp-delay = <6001>）。
+		 *   不加这项内核会打 `vdd_cpu: ramp_delay not set` 警告，
+		 *   且 cpufreq 无法正确计算调压后的等待时间。
+		 */
+		regulator-ramp-delay = <6001>;
+	};
+
+	vdd_logic: regulator-vdd-logic {
+		compatible = "pwm-regulator";
+		pwms = <&pwm2 0 5000 PWM_POLARITY_INVERTED>;
+		pwm-supply = <&vcc5v0_sys>;
+		regulator-name = "vdd_logic";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <705000>;
+		regulator-max-microvolt = <1006000>;
+		regulator-settling-time-up-us = <250>;
+		regulator-ramp-delay = <6001>;	/* 厂商 dtb 原值 */
+	};
+};
+
+&combphy {
+	status = "okay";
+};
+
+&cpu0 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&cpu1 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&cpu2 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&cpu3 {
+	cpu-supply = <&vdd_arm>;
+};
+
+/*
+ * 网口 1/1：板载 RGMII —— 全部为厂商 dtb 原值
+ *
+ * ★ 厂商 QWRT-R24.07.07 (h28x) 解出的 dtb 实证：
+ *   phy-mode       = "rgmii-rxid"   ← 不是 rgmii-id
+ *   tx_delay       = 59 (0x3b)
+ *   rx_delay       = 无（内核 dtsi 默认）
+ *   reset-gpio     = gpio4 pin18 = GPIO4_C2，低有效
+ *   reset-delays-us= <0 20000 100000>
+ *   pinctrl-0      = rgmii_miim / rgmii_tx_bus2 / rgmii_rx_bus2
+ *                    / rgmii_rgmii_clk / rgmii_rgmii_bus
+ *
+ * ⚠️ 复位脚的写法与本文件原先不同：厂商把复位配在 gmac1 节点的
+ *    snps,reset-gpio 上，而 PHY 节点（ethernet-phy@1）上**没有** reset-gpios。
+ *    本 DTS 改为与厂商一致。
+ */
+&gmac1 {
+	clock_in_out = "output";
+	phy-handle = <&rgmii_phy>;
+	phy-mode = "rgmii-rxid";
+	phy-supply = <&vcc_3v3>;
+	tx_delay = <0x3b>;
+
+	snps,reset-gpio = <&gpio4 RK_PC2 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&rgmii_miim>,
+		    <&rgmii_tx_bus2>,
+		    <&rgmii_rx_bus2>,
+		    <&rgmii_rgmii_clk>,
+		    <&rgmii_rgmii_bus>;
+	status = "okay";
+};
+
+&gpu {
+	mali-supply = <&vdd_logic>;
+	status = "okay";
+};
+
+/* PHY 只有地址与中断配置 —— 复位由 gmac1 的 snps,reset-gpio 负责 */
+&mdio1 {
+	rgmii_phy: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+	};
+};
+
+/*
+ * 网口 2/2：PCIe 千兆（官网：RTL8111H PCIe 千兆）
+ *
+ * ★ 参数全部取自厂商 dtb（/pcie@fe4f0000 + /phy@ffdc0000）。
+ *   ⚠️ 这里**刻意不写 pcie-eth 子节点** —— RTL8111H 是标准 PCI 设备，
+ *      控制器使能后内核 pcie 驱动枚举时会自动发现并绑定 r8169。
+ *      厂商 dtb 全树没有 pci10ec 节点，正是这个原因，
+ *      **不是**因为板上没有网卡。详见文件头详细说明。
+ *
+ *   若实机 `ls /sys/class/net/` 没出现 eth1，才说明该版本 RTL8111H
+ *   需要显式声明节点（不同 PCI ID 的 RTL8111 变体偶有这种情况），
+ *   那时补 pci10ec,8168 即可。
+ */
+&pcie {
+	pinctrl-names = "default";
+	pinctrl-0 = <&rtl8111hs_isolateb_l>;
+	reset-gpios = <&gpio4 RK_PA3 GPIO_ACTIVE_HIGH>;
+	vpcie3v3-supply = <&vcc_3v3>;
+	max-link-speed = <0x2>;      /* 厂商原值 Gen2 */
+	num-lanes = <0x1>;           /* 厂商原值 */
+	status = "okay";
+};
+
+&pinctrl {
+	/* 注：gmac1_rstn_l 已移除 —— 厂商 dtb 把 PHY 复位配在 gmac1 的
+	 * snps,reset-gpio 上，不走 pinctrl 节点。 */
+
+	leds {
+		lan_led: lan-led {
+			rockchip,pins = <4 RK_PC1 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		wan_led: wan-led {
+			rockchip,pins = <4 RK_PC0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		work_led: work-led {
+			rockchip,pins = <4 RK_PB7 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	pcie {
+		rtl8111hs_isolateb_l: rtl8111hs-isolateb-l {
+			rockchip,pins = <4 RK_PA6 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	sdmmc {
+		sdmmc_pwren_l: sdmmc-pwren-l {
+			rockchip,pins = <4 RK_PA1 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		sdmmc_vol_ctrl_h: sdmmc-vol-ctrl-h {
+			rockchip,pins = <4 RK_PB6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+&pwm1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm1m0_pins>;
+	status = "okay";
+};
+
+&pwm2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm2m0_pins>;
+	status = "okay";
+};
+
+&saradc {
+	vref-supply = <&vcc_1v8>;
+	status = "okay";
+};
+
+/*
+ * 存储（厂商 dtb + 官网「8G板载 eMMC / TF卡 x1 / 最大支持 512GB」）
+ *
+ * /mmc@ffbf0000 = sdhci  → 板载 8G eMMC
+ *   厂商原值：bus-width=8、cap-mmc-highspeed、mmc-hs200-1_8v、
+ *             no-sd、no-sdio、non-removable、max-frequency=200000000
+ *   ⚠️ `no-sdio` 就是厂商声明「本机无 WiFi」的依据 —— RK3528 的 WiFi 走 sdio0。
+ *     注意本机 TF 卡走的是 sdmmc（mmc@ffc30000），不是这个控制器。
+ *
+ * /mmc@ffc30000 = sdmmc → TF 卡槽
+ *   厂商原值：bus-width=4、cap-mmc-highspeed、cap-sd-highspeed、disable-wp、
+ *             supports-sd、max-frequency=150000000、
+ *             rockchip,use-v2-tuning、4 组 pinctrl
+ */
+&sdhci {
+	bus-width = <8>;
+	cap-mmc-highspeed;
+	mmc-hs200-1_8v;
+	non-removable;
+	no-sd;
+	no-sdio;
+	max-frequency = <200000000>;
+	vmmc-supply = <&vcc_3v3>;
+	vqmmc-supply = <&vcc_1v8>;
+	status = "okay";
+};
+
+&sdmmc {
+	bus-width = <4>;
+	cap-mmc-highspeed;
+	cap-sd-highspeed;
+	disable-wp;
+	supports-sd;
+	rockchip,use-v2-tuning;
+	max-frequency = <150000000>;
+	vmmc-supply = <&vcc3v3_sd>;
+	vqmmc-supply = <&vccio_sd>;
+	status = "okay";
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0m0_xfer>;
+	status = "okay";
+};
+
+&usb2phy {
+	status = "okay";
+};
+
+&usb2phy_host {
+	phy-supply = <&vcc5v0_sys>;
+	status = "okay";
+};
+
+&usb_host0_ehci {
+	status = "okay";
+};
+
+&usb_host0_ohci {
+	status = "okay";
+};

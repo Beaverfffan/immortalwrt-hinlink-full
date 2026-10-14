@@ -371,3 +371,63 @@ TARGET_DEVICES += hinlink_opc-h69k-mini
 
 # ===== RK3528 机型 =====
 
+define Device/hinlink_h28k_rk3528
+  $(Device/rk3528)
+  DEVICE_VENDOR := HINLINK
+  DEVICE_MODEL := OPC-H28K
+  DEVICE_ALT0_VENDOR := LinkStar
+  DEVICE_ALT0_MODEL := H28K
+  DEVICE_DTS := rk3528-hinlink-h28k
+  # ★ u-boot：直接用**上游 OpenWrt 的 HINLINK 支持**（见 patches-uboot/）
+  #   上游 package/boot/uboot-rockchip/Makefile 已有本条目，defconfig 与
+  #   u-boot dts 由 patches-uboot/ 里那两个 patch 提供（源自 openwrt/main
+  #   patches/106、107）。u-boot 2026.07 的
+  #   dts/upstream/src/arm64/rockchip/ 里已自带 rk3568-hinlink-h68k.dts。
+  #   TPL/ATF 走通用 rk3568_ddr_1560MHz + bl31，不依赖具体板子。
+  #   BUILD_DEVICES 已在我们的 Makefile 补丁里登记本机型，
+  #   ⇒ make defconfig 会自动带上 CONFIG_PACKAGE_u-boot-hinlink-h28k-rk3528=y。
+  UBOOT_DEVICE_NAME := hinlink-h28k-rk3528
+  # ★ H28K 是**双网口**：
+  #     网口1 RTL8211F RGMII 千兆（板载，gmac1）
+  #     网口2 RTL8111H  PCIe 千兆（PCI 枚举产生）
+  #   依据 HinLink 官网产品页。PCIe 侧网卡不写 pcie-eth 子节点，
+  #   靠内核 pcie 驱动枚举自动发现 —— 这也是 kmod-r8169 必须带的原因。
+  # ★ H28K **无板载 WiFi**：厂商 dtb 里 /mmc@ffbf0000 带 `no-sdio`，
+  #   明确禁用 SDIO（RK3528 的 WiFi 走 sdio0），故不带任何无线驱动。
+  # ★ 存储：板载 8G eMMC + TF 卡槽（厂商 dtb：mmc1=eMMC / mmc0=TF卡）
+  DEVICE_PACKAGES += kmod-r8169
+  # ★ 通用包集（LuCI + 全无线网卡驱动 + 风扇驱动）
+  $(Device/hinlink_common)
+endef
+TARGET_DEVICES += hinlink_h28k_rk3528
+
+# ===== H29K：v1.3 与 v5 硬分叉，各自独立 target =====
+#
+# 用户明确要求：v1.3 与 v5 分开 target，且每种屏幕大小独立机型，不做自适应。
+# 命名规则：h29k + 主板版本 + 屏幕大小
+#
+# ★ 屏幕尺寸只保留两种：**1.14 寸** 与 **1.49 寸**。
+#   厂商的 1.9 寸（170x320）与 2.8 寸（240x320）变体已按需求移除，
+#   对应 DTS / target / 02_network 条目一并删除。
+#
+# ---- v1.3 目标----
+#   硬件特征：无电池电压ADC、无红外接收、模组有 power-gpios(gpio4_B5)、无 &uart2
+#   屏幕驱动：ST7789V 1.14"
+#
+#   机型compatible         屏幕          板级屏参数
+#   h29k-v1.3-1.14hinlink,h29k-v1.3-114 135x240 rot270
+#
+# ---- v5 目标----
+#   硬件特征：有电池电压ADC(saradc ch1)、有红外(gpio4_PC6)、有 &uart2、模组无 power-gpios
+#   屏幕驱动：1.14" 为 ST7789V；1.49" 触屏版为 GC9307 + AXS5106 + PWM 背光
+#
+#   机型                compatible               屏幕         板级屏参数
+#   h29k-v5-1.14  hinlink,h29k-v5-114  135x240 rot90
+#   h29k-v5-1.49  hinlink,h29k-v5-149  172x320 rot270  GC9307 + AXS5106 + pwm3 背光
+
+# --- v1.3 目标 ---
+# 硬件要点：WiFi AIC8800(sdio0) / 屏 ST7789V 135x240 rot270 / GPIO 恒亮背光
+#   ★ 5G 模组 power-gpios = GPIO4_B5（单路，与 v5/H89K 不同）
+#   ★ 无电池电压 ADC、无红外接收、无 uart2
+#   屏偏移由 patches/9999-fbtft-read-display-offset-from-dt.patch 从 DT 读
+
