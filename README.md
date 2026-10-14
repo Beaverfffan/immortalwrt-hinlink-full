@@ -145,12 +145,40 @@ sysupgrade -n /tmp/xxx-squashfs-sysupgrade.img.gz
 
 ### 3.2 其它默认编入
 
+> ★ **先分清两件事**：
+> 下面列的是**编译出来的 Release 固件**（见 [Releases](../../releases) 页）所含内容。
+> 仓库里的**标准 `configs/*.config` 不含** passwall / openclash / ttyd / upnp，
+> 分区也是默认的 **16 / 160**。
+>
+> 想编出与 Release 相同的固件，先跑 `python3 tools/gen_release_cfg.py`
+> 生成 `configs-release/`，再
+> `CFGDIR=configs-release sh tools/build_single.sh`。
+
 - **LuCI**（完整）
 - `usbutils`（`lsusb` / `usbreset`，5G 排查用）
 - `kmod-usb-serial-option`（4G/5G 模组的 AT 口）
 - 风扇温控、SSD1306 OLED、5G 复位面板 —— 见下一节
+- **代理 / 终端 / UPnP 四件套**（**全部 16 个机型**都带）：
+  - `luci-app-passwall` —— 代理（子组件：`xray`、`sing-box`、`haproxy`、`v2ray-plugin`、`simple-obfs`、`shadowsocks-rust`、`v2ray-geoview`）
+  - `luci-app-openclash` —— Clash 内核（自动带上 `kmod-tun`、`kmod-inet-diag`、`kmod-nft-tproxy`、`kmod-nft-socket`、`ruby`）
+  - `luci-app-ttyd` —— 网页终端
+  - `luci-app-upnp` —— UPnP / NAT-PMP
 
-### 3.3 ⚠️ 关于板载屏幕：**能亮，但没有程序驱动它**
+### 3.3 分区大小：内核 128 MB / rootfs 1024 MB
+
+`configs/<机型>.config` 里**显式钉住**了这两个值（不再用 target 默认的 16 / 160）：
+
+```
+CONFIG_TARGET_KERNEL_PARTSIZE=128
+CONFIG_TARGET_ROOTFS_PARTSIZE=1024
+```
+
+放大原因是 passwall / openclash 及其依赖（xray-core、sing-box、ruby 等）在
+默认 160 MB 的 rootfs 里放不下。这两个值**只影响镜像生成阶段**（分区表 + padding），
+不参与任何 C 代码编译 —— 所以可以按机型随意设定，不会引起重编。
+（`gen_configs.py` 会在 `defconfig` 之后复查这两行没被改回去。）
+
+### 3.4 ⚠️ 关于板载屏幕：**能亮，但没有程序驱动它**
 
 H29K 全系（1.14″ / 1.49″）与 H88K-v3、H89K 的 DTS 里都有 SPI 面板节点，内核侧
 也打了 fbtft 驱动并内建 `CONFIG_FB`：
