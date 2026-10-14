@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * HinLink OPC-H68K c-d-f (USB3.0)
+ *
+ * HinLink 适配 for immortalwrt —— 每机型独立 DTS，不做自适应。
+ *
+ * 硬件事实来源：厂商 2022 R22.8.22 (armv8-h68k-c) 与 2023 R23.4.20 固件 dtb
+ * 蓝本：OpenWrt 主线 rk3568-hinlink-h68k.dts
+ *
+ * ★ 本文件承载四个历史标识（硬件配置完全相同，2026-10-12 合并）：
+ *     hinlink,opc-h68k-c-usb    —— 2022 C/D/F 的 USB3.0 变体
+ *     hinlink,opc-h68k-c-usb3   —— 2022.8 的 c-usb3 改型
+ *     hinlink,opc-h68k-d-usb    —— 2023.4 D 的 USB3.0 变体
+ *                                  （原 rk3568-hinlink-h68k-d-usb.dts，
+ *                                    与 c-usb3 归一化后 0 行差异）
+ *   都是「c-d-f 基础上把 SATA 口改成 USB 3.0」，DTS 无差异，
+ *   故合并为一份 DTS，用多个 compatible 兼容旧固件的 board 匹配。
+ *   映射：LAN eth1 eth2 eth3 / **WAN eth0**。
+ *   ⚠️ 2026-10-12 实机更正：原来写的是「LAN eth0 eth2 eth3 / WAN eth1」，错了。
+ *
+ * ★ USB3.0 变体（文件名带 -usb）：sata0 禁用，combphy0 供 USB3.0
+ */
+
+/dts-v1/;
+
+#include "rk3568-hinlink-opc.dtsi"
+
+/ {
+	model = "HINLINK OPC-H68K c-d-f (2022~2023.4, USB3.0)";
+	compatible = "hinlink,opc-h68k-c-d-f-usb", "hinlink,opc-h68k-c-usb3", "hinlink,opc-h68k-c-usb", "hinlink,opc-h68k-d-usb", "hinlink,h68k", "linkstar,h68k", "rockchip,rk3568";
+
+	aliases {
+		ethernet0 = &gmac0;
+		ethernet1 = &gmac1;
+	};
+};
+&gmac0 {
+	assigned-clocks = <&cru SCLK_GMAC0_RX_TX>, <&cru SCLK_GMAC0>;
+	assigned-clock-parents = <&cru SCLK_GMAC0_RGMII_SPEED>;
+	assigned-clock-rates = <0>, <125000000>;
+	clock_in_out = "output";
+	phy-mode = "rgmii-id";
+	phy-supply = <&vcc3v3_sys>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&gmac0_miim
+		     &gmac0_tx_bus2
+		     &gmac0_rx_bus2
+		     &gmac0_rgmii_clk
+		     &gmac0_rgmii_bus
+		     &gmac0_rstn>;
+	snps,reset-gpios = <&gpio2 RK_PD3 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	tx_delay = <0x3c>;
+	rx_delay = <0x2f>;
+	phy-handle = <&rgmii_phy0>;
+	status = "okay";
+};
+
+&gmac1 {
+	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
+	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>;
+	assigned-clock-rates = <0>, <125000000>;
+	clock_in_out = "output";
+	phy-mode = "rgmii-id";
+	phy-supply = <&vcc3v3_sys>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&gmac1m1_miim
+		     &gmac1m1_tx_bus2
+		     &gmac1m1_rx_bus2
+		     &gmac1m1_rgmii_clk
+		     &gmac1m1_rgmii_bus
+		     &gmac1_rstn>;
+	snps,reset-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	tx_delay = <0x4f>;
+	rx_delay = <0x26>;
+	phy-handle = <&rgmii_phy1>;
+	status = "okay";
+};
+
+&mdio0 {
+	rgmii_phy0: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+	};
+};
+
+&mdio1 {
+	rgmii_phy1: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+	};
+};
+
+&pinctrl {
+	gmac {
+		gmac0_rstn: gmac0-rstn {
+			rockchip,pins = <2 RK_PD3 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		gmac1_rstn: gmac1-rstn {
+			rockchip,pins = <1 RK_PB0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+/* ============================================================
+ * 本改型即「USB3.0 版」—— combphy0 已分配给 USB3.0
+ *
+ * 2022.8 的 c-usb3 / 2023.4 的 d-usb 都是在 C/D/F 基础上把 SATA 口改成 USB 3.0
+ * 的改型，因此不需要再拆 SATA 变体。需要 SATA 的机器请用
+ * rk3568-hinlink-h68k-c-d-f.dts。
+ *
+ * ★ RK3568 硬件复用（rk3568.dtsi 实证）：
+ *     sata0  phys = <&combphy0 PHY_TYPE_SATA>   (phy@fe820000)
+ *     USB3.0 也需要 combphy0 作 PHY_TYPE_USB3
+ *   combphy 同一时刻只能一种 PHY_TYPE ⇒ 二选一。
+ *
+ * ★ 该复用只存在于 2022-2023 老机器（h68k-a-b / c-d-f 两组的两个变体）。
+ *   新机 h68k-new 与 h69k 系不涉及，两者可同时使用。
+ * ============================================================ */
+
+&sata0 {
+	status = "disabled";
+};
