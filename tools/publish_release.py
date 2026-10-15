@@ -148,7 +148,13 @@ def curl_upload(rid, path, name):
 
 def main():
     # ---- 1) 创建（或复用）release ----
-    payload = json.dumps({"tag_name": TAG, "name": TAG, "body": BODY,
+    # BODY_FILE 环境变量可覆盖默认说明（比如 NAS/Docker 版另写一份）
+    body = BODY
+    bf = os.environ.get("BODY_FILE")
+    if bf and os.path.isfile(bf):
+        body = open(bf, encoding="utf-8").read()
+        print("使用自定义说明：%s（%d 字节）" % (bf, len(body)))
+    payload = json.dumps({"tag_name": TAG, "name": TAG, "body": body,
                           "draft": False})
     st, r = api("POST", "https://api.github.com/repos/%s/releases" % REPO, payload)
     if st == 422:      # already_exists

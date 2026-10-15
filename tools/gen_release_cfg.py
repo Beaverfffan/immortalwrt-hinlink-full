@@ -34,6 +34,8 @@
     python3 tools/gen_release_cfg.py             # 只生成，不跑 defconfig
     python3 tools/gen_release_cfg.py --check     # 逐份 make defconfig 验证
     python3 tools/gen_release_cfg.py --out DIR   # 指定输出目录
+    python3 tools/gen_release_cfg.py --nas --check   # 叠加 NAS/Docker 套件
+                                                     # -> configs-release-nas/
 
 生成的 `configs-release/<机型>.config` 供 `tools/build_single.sh` 使用：
     CFGDIR=configs-release sh tools/build_single.sh
@@ -72,10 +74,33 @@ CONFIG_PACKAGE_luci-app-passwall_INCLUDE_V2ray_Plugin=y
 CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray=y
 """ % {"kp": KERNEL_PARTSIZE, "rp": ROOTFS_PARTSIZE}
 
+# ── 可选的额外包集合（--nas）──────────────────────────────────────────
+# 用户 2026-10-15：「再出一个带 luci-app-diskman / luci-app-samba4 /
+# luci-app-dockerman / docker 的固件，放在另外一个 release」。
+# 经确认：**叠加**在现有发行版之上（四件套保留）、rootfs 仍 1024 MB、16 机型全编。
+#
+# 四个包都在官方 feeds 里：
+#   feeds/luci/applications/{luci-app-diskman,luci-app-samba4,luci-app-dockerman}
+#   feeds/packages/utils/{docker,dockerd,docker-compose}
+# docker 的依赖（kmod-veth / kmod-br-netfilter / kmod-ip6tables …）由 defconfig
+# 自动 select。内核侧 CGROUPS / NAMESPACES / OVERLAY_FS 已具备，只有 **VETH 需要
+# 新开** ⇒ 会触发一次内核重编（这是加入 docker 的主要代价）。
+NAS_EXTRA = """
+# ---- NAS / Docker 套件（--nas 时追加）----
+CONFIG_PACKAGE_luci-app-diskman=y
+CONFIG_PACKAGE_luci-app-samba4=y
+CONFIG_PACKAGE_luci-app-dockerman=y
+CONFIG_PACKAGE_docker=y
+"""
+
 # defconfig 之后必须仍然存在（丢了 = 包名错 / 依赖不满足，会被静默丢弃）
 MUST_KEEP = [
     "luci-app-passwall", "luci-app-openclash",
     "luci-app-ttyd", "luci-app-upnp",
+]
+NAS_MUST_KEEP = [
+    "luci-app-diskman", "luci-app-samba4",
+    "luci-app-dockerman", "docker",
 ]
 MUST_KEEP_LINES = [
     "CONFIG_TARGET_KERNEL_PARTSIZE=%d" % KERNEL_PARTSIZE,
@@ -83,21 +108,24 @@ MUST_KEEP_LINES = [
 ]
 
 
-def inject(txt):
-    """去掉标准 config 里已有的分区行，再追加发行版注入段。"""
+def inject(txt, extra=""):
+    """去掉标准 config 里已有的分区行，再追加发行版注入段（+ 可选额外段）。"""
     out = []
     for ln in txt.splitlines():
         if ln.startswith("CONFIG_TARGET_KERNEL_PARTSIZE=") or \
                 ln.startswith("CONFIG_TARGET_ROOTFS_PARTSIZE="):
             continue
         out.append(ln)
-    return "\n".join(out) + "\n" + INJECT
+    return "\n".join(out) + "\n" + INJECT + extra
 
 
 def main():
     argv = sys.argv[1:]
     do_check = "--check" in argv
-    out_dir = os.path.join(TREE, "configs-release")
+    nas = "--nas" in argv
+    extra = NAS_EXTRA if nas else ""
+    # 默认输出目录：普通发行版 -> configs-release/；NAS 版 -> configs-release-nas/
+    out_dir = os.path.join(TREE, "configs-release-nas" if nas else "configs-release")
     if "--out" in argv:
         out_dir = argv[argv.index("--out") + 1]
 
@@ -115,7 +143,7 @@ def main():
         src = os.path.join(SRC_DIR, name)
         dst = os.path.join(out_dir, name)
         txt = open(src, encoding="utf-8").read()
-        open(dst, "w", encoding="utf-8", newline="\n").write(inject(txt))
+        open(dst, "w", encoding="utf-8", newline="\n").write(inject(txt, extra))
 
         dev = re.search(re.escape(PREFIX) + r'([^\s=]+)=y', txt)
         tag = "生成"
@@ -131,7 +159,8 @@ def main():
                 continue
             shutil.copy(defconfig, dst)
             after = open(dst, encoding="utf-8").read()
-            miss = [k for k in MUST_KEEP if ("CONFIG_PACKAGE_%s=y" % k) not in after]
+            want = MUST_KEEP + (NAS_MUST_KEEP if nas else [])
+            miss = [k for k in want if ("CONFIG_PACKAGE_%s=y" % k) not in after]
             miss += [k for k in MUST_KEEP_LINES if k not in after]
             tag = "OK" if not miss else "缺(%d)" % len(miss)
             if miss:
@@ -146,7 +175,7 @@ def main():
 
     print("\n输出目录：%s" % out_dir)
     print("完成：%d 份%s" % (ok, ("，%d 份有问题" % fail) if fail else ""))
-    print("编译：CFGDIR=configs-release sh tools/build_single.sh")
+    print("编译：CFGDIR=%s sh tools/build_single.sh" % os.path.basename(out_dir))
 
 
 if __name__ == "__main__":

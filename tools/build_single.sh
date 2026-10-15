@@ -36,6 +36,30 @@ mkdir -p "$OUT" "$LOGDIR"
 [ -f "$TREE/include/image.mk" ] || { echo "请在 immortalwrt 树根执行"; exit 1; }
 [ -d "$TREE/$CFGDIR" ] || { echo "找不到配置目录 $TREE/$CFGDIR"; exit 1; }
 
+# ---------------------------------------------------------------------------
+# [0] 清理与 package/beaverfffan/ 下自维护包**同名**的 feed 包
+#
+# immortalwrt 官方 luci feed 里也有一个 luci-app-oled（unifreq 血统）；
+# `./scripts/feeds install -a` 会在 package/feeds/luci/ 下建出同名软链。
+# OpenWrt 扫描 package/ 时按字母序，package/feeds/* 晚于 package/beaverfffan/*
+# ⇒ 同名 Package/luci-app-oled 定义被 feed 那份覆盖，固件里装的就成了它
+# （H69K 屏上 netsource 显示 eth0，而不是我们这版给 5G 用的 wwan0）。
+# 这里统一把同名 feed 目录删掉，让 package/beaverfffan/ 下的版本胜出。
+#
+# 注意：直接 `make defconfig && make` 的用户不会走本脚本 —— 所以 README 的
+# 编译步骤里也写了同样的一句（./scripts/feeds uninstall luci-app-oled）。
+# ---------------------------------------------------------------------------
+echo "=== [0] 清理与自维护包同名的 feed 包 ==="
+for d in "$TREE"/package/beaverfffan/*/; do
+	[ -d "$d" ] || continue
+	name=$(basename "$d")
+	for f in "$TREE"/package/feeds/*/"$name"; do
+		[ -e "$f" ] || continue
+		rm -rf "$f"
+		echo "  已删除冲突: ${f#$TREE/}   （保留 package/beaverfffan/$name）"
+	done
+done
+
 if [ $# -gt 0 ]; then
 	LIST="$*"
 else
@@ -48,7 +72,7 @@ echo "配置目录:$CFGDIR"
 echo "机型:$LIST"
 echo "产物:$OUT   并发:-j$JOBS"
 
-echo "=== [0] 预下载全部源码（passwall/openclash 会拉 v2ray/xray/sing-box 等）==="
+echo "=== [1] 预下载全部源码（passwall/openclash 会拉 v2ray/xray/sing-box 等）==="
 ( cd "$TREE" && make -j"$JOBS" download ) >"$LOGDIR/_download.log" 2>&1 \
 	|| echo "!! download 有失败项（非致命，编译到时会重试），见 $LOGDIR/_download.log"
 

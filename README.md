@@ -35,10 +35,33 @@ cd immortalwrt-hinlink-full
 ```sh
 ./scripts/feeds update -a
 ./scripts/feeds install -a
+
+# ★ 关键一步：让 package/beaverfffan/ 下的自维护包生效
+./scripts/feeds uninstall fancontrol luci-app-fancontrol luci-app-oled
 ```
 
-> `package/beaverfffan/` 下是本仓库自带的插件，**不需要** feeds，也不会被
-> 上面两条命令动到。
+> **为什么必须卸掉这三个？**
+> feeds 里有三个与 `package/beaverfffan/` 下**同名**的包，`install -a` 会在
+> `package/feeds/` 下建出软链；而 OpenWrt 扫描 `package/` 时按字母序，
+> `package/feeds/*` **晚于** `package/beaverfffan/*` ⇒ 同名包会被 feed 那份
+> **静默覆盖**（编译不报错，但装进固件的是 feed 版）：
+>
+> | 被覆盖的包 | 后果 |
+> |---|---|
+> | `fancontrol` | 用的是上游配置 —— **温控默认是关的**（本仓库改成了默认开） |
+> | `luci-app-fancontrol` | 功能等同，无实质影响 |
+> | `luci-app-oled` | 用的是 unifreq 血统那版 —— H69K 屏上网络速度取 `eth0`，而不是本仓库这版的 `wwan0`（5G 模组） |
+>
+> 想直接删软链也行（等价）：
+> ```sh
+> rm -rf package/feeds/packages/fancontrol \
+>        package/feeds/luci/luci-app-fancontrol \
+>        package/feeds/luci/luci-app-oled
+> ```
+>
+> 用 `tools/build_single.sh` 编译时**脚本已自动做这一步**，不用手工执行。
+> 注意 `aic8800` 与 `luci-app-hinlink-modem-hardreset` 在 feeds 里没有同名包，
+> 不受影响。
 
 ### 3. 选机型
 
