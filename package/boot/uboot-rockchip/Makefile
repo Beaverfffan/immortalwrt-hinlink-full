@@ -303,16 +303,21 @@ define U-Boot/hinlink-h66k-rk3568
     hinlink_opc-h66k
 endef
 
+# ★ h68k 系（含 h69k / h69k-mini）：BUILD_DEVICES 必须写**当前有效**的 device 名。
+#   2026-10-12 合并改名后（h68k-a -> h68k-a-b、h68k-c/d -> h68k-c-d-f …），
+#   若这里仍留旧名，BUILD_DEVICES 就匹配不到任何被选中的 device，
+#   `make defconfig` 不会自动选上 u-boot-hinlink-h68k-rk3568，
+#   从零编译时会在 image 阶段报 No such file:
+#       .../staging_dir/.../hinlink-h68k-rk3568-u-boot-rockchip.bin
+#   （在有 u-boot 缓存的树上反而看不出来 —— 2026-10-15 用户反馈后修的）
 define U-Boot/hinlink-h68k-rk3568
   $(U-Boot/rk3568/Default)
   NAME:=HINLINK H68K
   BUILD_DEVICES:= \
-    hinlink_opc-h68k-a \
-    hinlink_opc-h68k-a-usb \
-    hinlink_opc-h68k-c \
-    hinlink_opc-h68k-c-usb3 \
-    hinlink_opc-h68k-d \
-    hinlink_opc-h68k-d-usb \
+    hinlink_opc-h68k-a-b \
+    hinlink_opc-h68k-a-b-usb \
+    hinlink_opc-h68k-c-d-f \
+    hinlink_opc-h68k-c-d-f-usb \
     hinlink_opc-h68k-new \
     hinlink_opc-h69k \
     hinlink_opc-h69k-mini
