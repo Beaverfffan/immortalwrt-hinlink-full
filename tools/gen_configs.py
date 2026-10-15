@@ -70,35 +70,53 @@ CONFIG_PACKAGE_kmod-mt7925-firmware=y
 CONFIG_PACKAGE_kmod-ath11k=y
 CONFIG_PACKAGE_kmod-ath11k-pci=y
 CONFIG_PACKAGE_ath11k-firmware-wcn6855=y
-CONFIG_PACKAGE_luci-app-fancontrol=y
-CONFIG_PACKAGE_fancontrol=y
 CONFIG_PACKAGE_luci-app-oled=y
 """
 
-# ★ 5G 复位面板只编进「**有风扇 且 有 5G 复位脚**」的机型（用户 2026-10-14 指定）。
+# ★ 风扇插件与 5G 复位面板是**两个独立的判据**（用户 2026-10-15 更正）：
 #
-# 硬件能力表是 2026-10-14 从 DTS 里逐个 grep 出来的，别再凭印象改：
-#   有风扇（pwm-fan 节点）：
-#     h69k / h69k-mini      —— 各自 dts 里的 pwm-fan（PWM0 绑 cpu_thermal）
-#     h88k-v2 / h88k-v3 / h89k —— 三者都 #include "rk3588-hinlink.dtsi"，
-#                                风扇节点在 dtsi 里（pwm14，5 档 cooling-levels）
-#   有 5G 复位脚（rfkill-gpio）：
-#     h29k 全系 3 个         —— GPIO4_B4 复位（低有效）+ GPIO4_B5 供电
-#     h69k / h69k-mini      —— GPIO0_C0（单路，低有效）
-#     h88k-v2 / h88k-v3 / h89k —— GPIO4_C6 复位（高有效），定义在 rk3588-hinlink.dtsi
-#   交集 = 下面 5 个。
+#       有风扇        -> 编风扇插件（fancontrol + luci-app-fancontrol）
+#       有 5G 复位脚  -> 编 5G 复位面板（luci-app-hinlink-modem-hardreset）
 #
-# ⚠️ h29k 全系**有 5G 复位脚但没有风扇**，按该条件被排除 —— 如果也要给它们编，
-#    把 short 名加进 MODEM_APP 即可（DTS 里确实定义了 rfkill-gpio）。
+# ⚠️ 早先我误写成「同时具备风扇与 5G 复位脚」取**交集**，结果 5G 面板只编了 5 个
+#    机型，把「有复位脚但没有风扇」的 H29K 全系漏掉了。**不要再取交集。**
+#
+# 硬件能力表 2026-10-15 重新逐个 grep DTS 核实。
+# ★ 必须区分「真实节点」与「注释里提到」—— 两个真实的误判源：
+#     · ht2 的 dts 里有一行注释「无 4G/5G LED 与 rfkill（H29K 才有）」
+#       ⇒ 直接 grep rfkill 会把 ht2 误判成「有复位脚」
+#     · h89k 的 dts 里有一行注释「风扇 = pwm14，5 档（由 dtsi 的 pwm-fan 提供）」
+#       ⇒ 直接 grep pwm-fan 会把它误判成「本文件有风扇」（其实在 dtsi 里）
+#   所以判据是 **`compatible = "rfkill-gpio"` / 真实 pwm-fan 节点**，不是裸关键词。
+#
+#   有风扇（5 个）：
+#     h69k            —— rk3568-hinlink-h69k-3eth.dts 自带 pwm-fan
+#     h69k-mini       —— rk3568-hinlink-h69k-mini.dts 自带 pwm-fan
+#     h88k-v2/v3、h89k —— 三者 #include "rk3588-hinlink.dtsi"，
+#                        风扇节点（pwm14，5 档 cooling-levels）在 **dtsi** 里，
+#                        只 grep 各自的 dts 会得出「无风扇」的错误结论
+#
+#   有 5G 复位脚（8 个）：
+#     h29k 全系 3 个   —— GPIO4_B4 复位（低有效）+ GPIO4_B5 供电
+#     h69k / h69k-mini —— GPIO0_C0（单路，低有效）
+#     h88k-v2/v3、h89k —— GPIO4_C6 复位（高有效），定义在 rk3588-hinlink.dtsi
+#
+#   两者都没有：h28k / ht2 / h66k / h68k 全系
+#              （`rk3568-hinlink-opc.dtsi` 里既无 pwm-fan 也无 rfkill，已核实）
 HAS_FAN = {"h69k", "h69k-mini", "h88k-v2", "h88k-v3", "h89k"}
 HAS_MODEM = {"h29k-v1.3-1.14", "h29k-v5-1.14", "h29k-v5-1.49",
              "h69k", "h69k-mini", "h88k-v2", "h88k-v3", "h89k"}
-MODEM_APP = sorted(HAS_FAN & HAS_MODEM)
 
-MODEM_APP_ON = "CONFIG_PACKAGE_luci-app-hinlink-modem-hardreset=y\n"
-MODEM_APP_OFF = "# CONFIG_PACKAGE_luci-app-hinlink-modem-hardreset is not set\n"
+FAN_ON = ("CONFIG_PACKAGE_luci-app-fancontrol=y\n"
+          "CONFIG_PACKAGE_fancontrol=y\n")
+FAN_OFF = ("# CONFIG_PACKAGE_luci-app-fancontrol is not set\n"
+           "# CONFIG_PACKAGE_fancontrol is not set\n")
+
+MODEM_ON = "CONFIG_PACKAGE_luci-app-hinlink-modem-hardreset=y\n"
+MODEM_OFF = "# CONFIG_PACKAGE_luci-app-hinlink-modem-hardreset is not set\n"
 
 # defconfig 之后必须仍然存在的包（丢了就是包名错/依赖不满足）
+# 注意：风扇相关包不在这里 —— 它只对 HAS_FAN 的机型要求（见 main）。
 MUST_KEEP_COMMON = [
     "kmod-mt7921e", "kmod-mt7921-firmware",
     "kmod-mt7922-firmware",
@@ -106,7 +124,7 @@ MUST_KEEP_COMMON = [
     "kmod-mt7925e", "kmod-mt7925-firmware",
     "kmod-ath11k", "kmod-ath11k-pci", "ath11k-firmware-wcn6855",
     "kmod-aic8800-pcie", "kmod-aic8800-sdio", "kmod-aic8800-usb",
-    "luci-app-fancontrol", "fancontrol", "luci-app-oled",
+    "luci-app-oled",
 ]
 
 
@@ -125,6 +143,11 @@ def make_single(base, dev, short):
                 out.append("# %s%s is not set" % (PREFIX, name))
         elif ln.startswith("CONFIG_TARGET_PROFILE="):
             continue                      # 统一在末尾重设
+        elif ln.startswith("CONFIG_PACKAGE_luci-app-fancontrol") or \
+                ln.startswith("CONFIG_PACKAGE_fancontrol"):
+            continue                      # 由 HAS_FAN 在末尾统一决定
+        elif ln.startswith("CONFIG_PACKAGE_luci-app-hinlink-modem-hardreset"):
+            continue                      # 由 HAS_MODEM 在末尾统一决定
         else:
             out.append(ln)
 
@@ -132,8 +155,9 @@ def make_single(base, dev, short):
     out.append('CONFIG_TARGET_PROFILE="DEVICE_%s"' % dev)
     out.append("# CONFIG_TARGET_PER_DEVICE_ROOTFS is not set")
     out.append(EXTRA_COMMON)
-    # 5G 复位面板：只有「有风扇 且 有 5G 复位脚」的机型才编
-    out.append(MODEM_APP_ON if short in MODEM_APP else MODEM_APP_OFF)
+    # ★ 两个独立判据（不取交集）：有风扇 -> 风扇插件；有复位脚 -> 5G 面板
+    out.append(FAN_ON if short in HAS_FAN else FAN_OFF)
+    out.append(MODEM_ON if short in HAS_MODEM else MODEM_OFF)
     return "\n".join(out) + "\n"
 
 
@@ -145,7 +169,8 @@ def main():
 
     defconfig = os.path.join(TREE, ".config")
     ok = fail = 0
-    print("5G 复位面板只编入（有风扇 且 有 5G 复位脚）：%s\n" % " ".join(MODEM_APP))
+    print("风扇插件（有风扇）      -> %s" % " ".join(sorted(HAS_FAN)))
+    print("5G 复位面板（有复位脚） -> %s\n" % " ".join(sorted(HAS_MODEM)))
     for short, dev in DEVICES:
         p = os.path.join(OUT, short + ".config")
         open(p, "w", encoding="utf-8", newline="\n").write(
@@ -165,18 +190,23 @@ def main():
         after = open(p, encoding="utf-8").read()
 
         must = list(MUST_KEEP_COMMON)
-        if short in MODEM_APP:
+        if short in HAS_FAN:
+            must += ["luci-app-fancontrol", "fancontrol"]
+        if short in HAS_MODEM:
             must.append("luci-app-hinlink-modem-hardreset")
         miss = [k for k in must if ("CONFIG_PACKAGE_%s=y" % k) not in after]
         # 反向检查：不该选的机型别被别处（比如底稿）带进来
-        if short not in MODEM_APP and \
+        if short not in HAS_FAN and "CONFIG_PACKAGE_fancontrol=y" in after:
+            miss.append("!(误选)风扇")
+        if short not in HAS_MODEM and \
                 "CONFIG_PACKAGE_luci-app-hinlink-modem-hardreset=y" in after:
             miss.append("!(误选)5G复位面板")
 
         got = re.search(re.escape(PREFIX) + r'([^\s=]+)=y', after)
         profile = re.search(r'^CONFIG_TARGET_PROFILE="?([^"\n]+)"?', after, re.M)
 
-        apps = "5G复位" if short in MODEM_APP else "-"
+        apps = ("风扇" if short in HAS_FAN else "..") + "/" + \
+               ("5G" if short in HAS_MODEM else "..")
         tag = "OK"
         if miss:
             tag = "缺包(%d)" % len(miss)
@@ -188,7 +218,7 @@ def main():
         else:
             ok += 1
 
-        print("%-16s %-11s 5G面板=%-7s lines=%-5d device=%s"
+        print("%-16s %-11s 插件=%-8s lines=%-5d device=%s"
               % (short, tag, apps, len(after.splitlines()),
                  got.group(1) if got else "?"))
         if miss:

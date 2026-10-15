@@ -27,7 +27,7 @@ if not TOKEN:
     sys.exit("需要 GH_TOKEN 环境变量")
 
 REPO = os.environ.get("REPO", "Beaverfffan/immortalwrt-hinlink-full")
-TAG = os.environ.get("TAG", "v2026.10.14-hinlink-16dev")
+TAG = os.environ.get("TAG", "v2026.10.15-hinlink-16dev")
 OUT = os.environ.get("HINLINK_OUT", os.path.expanduser("~/hinlink-out"))
 
 BODY = """\
@@ -36,16 +36,32 @@ BODY = """\
 基于 **immortalwrt master**（内核 6.18.55）+ HinLink 全系适配。
 本页为编译产物；对应源码与每机型 config 见仓库 `configs/` 与 `docs/devices/`。
 
-### 与上一版的区别
+### 本版修正了什么
 
-| 项 | 本版 | 上一版 |
+上一版把「有风扇」与「有 5G 复位脚」当成了**一个交集条件**，结果 H29K 全系
+（**有 5G 复位脚、但没有风扇**）被漏掉。两者其实是**独立的**：
+
+> **机器有风扇 → 就编风扇插件；有 5G 复位脚 → 就编复位面板。**
+
+| 插件 | 本版 | 上一版 |
 |---|---|---|
-| 内核分区 | **128 MB** | 16 MB |
-| rootfs 分区 | **1024 MB** | 160 MB |
-| 新增应用 | **luci-app-passwall**、**luci-app-openclash**、**luci-app-ttyd**、**luci-app-upnp** | — |
+| 风扇温控 `luci-app-fancontrol` | **只给有风扇的 5 个机型** | 16 个机型全编（多编了） |
+| 5G 复位面板 `luci-app-hinlink-modem-hardreset` | **给有 5G 复位脚的 8 个机型** | 只有 5 个（漏了 H29K 全系） |
+| passwall / openclash / ttyd / upnp | 16 个机型全带 | 同 |
+| 内核 / rootfs 分区 | 128 MB / 1024 MB | 同 |
 
-分区放大是为了放得下 passwall / openclash 及其依赖（xray、sing-box、ruby 等）。
-四个应用**全部 16 个机型都带**。
+### 机型 × 插件对照
+
+| 机型 | 风扇插件 | 5G 复位面板 |
+|---|---|---|
+| h69k、h69k-mini | ✅ | ✅ |
+| h88k-v2、h88k-v3、h89k | ✅ | ✅ |
+| h29k-v1.3-1.14、h29k-v5-1.14、h29k-v5-1.49 | — | ✅ |
+| h28k、ht2、h66k、h68k-a-b、h68k-a-b-usb、h68k-c-d-f、h68k-c-d-f-usb、h68k-new | — | — |
+
+> 依据是 DTS 里的**真实节点**（`pwm-fan` / `compatible = "rfkill-gpio"`），
+> 逐个 grep 核实过。注意区分「节点」与「注释」：ht2 的 dts 里有一行注释就写着
+> 「无 4G/5G LED 与 rfkill」，H89K 的 dts 里也有注释提到风扇（实际节点在 dtsi）。
 
 ### 已内置的驱动
 
@@ -64,11 +80,13 @@ RK3588  h88k-v2  h88k-v3  h89k
 * `*-squashfs-sysupgrade.img.gz` —— 常规刷机（推荐）
 * `*-ext4-sysupgrade.img.gz` —— 需要可写大分区时用
 
-### 5G 复位面板
+### 5G 复位面板 与 风扇插件（两个独立判据）
 
-`luci-app-hinlink-modem-hardreset`（菜单：**网络 → 5G复位**）**只在同时具备风扇与 5G 复位脚的 5 个机型**上编译：
-`h69k`、`h69k-mini`、`h88k-v2`、`h88k-v3`、`h89k`。
-（H29K 全系有 5G 复位脚但无风扇，按上游约定未编入。）
+- `luci-app-hinlink-modem-hardreset`（菜单：**网络 → 5G复位**）
+  → **有 5G 复位脚的 8 个机型**：`h29k-v1.3-1.14`、`h29k-v5-1.14`、
+  `h29k-v5-1.49`、`h69k`、`h69k-mini`、`h88k-v2`、`h88k-v3`、`h89k`
+- 风扇温控（`luci-app-fancontrol` + `fancontrol`，默认开启温控）
+  → **有风扇的 5 个机型**：`h69k`、`h69k-mini`、`h88k-v2`、`h88k-v3`、`h89k`
 
 ### 板载屏幕提示
 
