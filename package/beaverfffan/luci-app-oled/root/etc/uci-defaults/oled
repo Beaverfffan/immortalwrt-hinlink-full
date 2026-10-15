@@ -34,5 +34,25 @@ uci -q batch <<-EOF >/dev/null
 	commit ucitrack
 EOF
 
+# ---------------------------------------------------------------------------
+# ★ 修 init 脚本的可执行位 + 启用服务（2026-10-15 实机排障补）
+#
+# 本包的 root/etc/init.d/oled 在「构建机 -> Windows -> 构建机」的搬运途中丢了
+# 可执行位（Windows 文件系统不保留 Unix 权限位；git 里记的也是 100644），
+# 而 luci.mk 是**按源文件权限原样安装**的 ⇒ 装进固件后是 644，后果：
+#     · 开机 rcS 起不来它（S88oled 软链也建不出来）
+#     · 手工执行直接报 "/etc/init.d/oled: Permission denied"
+#   ⇒ 表现就是「屏接对了、i2c-5 也通了、0x3c 也在，但 oled 进程永不运行、屏一直黑」。
+#
+# uci-defaults 由 /etc/init.d/boot 用 `sh` 调用（**不需要**可执行位），
+# 正好在这里补：修权限 → enable（建 rc.d 软链，下次开机自启）→ 本次立即起一次。
+#
+# 不把 755 直接写进 git 的原因：这条搬运链路只要再经过一次 Windows 就会再丢一次；
+# 放在 uci-defaults 里与平台无关，用户 clone 后自行编译同样有效。
+# ---------------------------------------------------------------------------
+chmod 755 /etc/init.d/oled 2>/dev/null
+/etc/init.d/oled enable 2>/dev/null
+/etc/init.d/oled start 2>/dev/null
+
 rm -rf /tmp/luci-*
 exit 0

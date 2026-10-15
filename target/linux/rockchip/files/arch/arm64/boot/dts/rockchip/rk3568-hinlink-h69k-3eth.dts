@@ -313,6 +313,32 @@
 };
 
 /*
+ * ★★ I2C5 = OLED（SSD1306 0.91″）总线 —— 必须使能 ★★
+ *
+ * 2026-10-15 用户实测：H69K 上接的 SSD1306 屏一直不亮。根因就是这一段缺失：
+ *   未使能 ⇒ i2c5 控制器不注册 ⇒ 系统里没有 /dev/i2c-5
+ *          ⇒ luci-app-oled 的 /usr/bin/oled 打不开设备、procd 起不来进程
+ *          ⇒ 屏始终黑屏。
+ *   （luci-app-oled 的 uci-defaults 给 hinlink,opc-h69k 配的正是
+ *     path=/dev/i2c-5 —— 配置是对的，坏在总线根本没出现。）
+ *
+ * 控制器节点在 rk356x-base.dtsi 里已经带
+ *     pinctrl-0 = <&i2c5m0_xfer>;     // GPIO3_B3 = SCL, GPIO3_B4 = SDA
+ * 所以这里只需要 status + 时序，**不要**再写 pinctrl（重复指定会浪费一次
+ * 申请、且与 SoC dtsi 冲突）。GPIO3_B3/B4 在本板其它节点里均未被占用，
+ * 已逐个核对过。
+ *
+ * 下面的时序参数取自 iStoreOS 官方 rk3568-hinlink.dtsi（同硬件实测可用）。
+ * 若屏排线较长、400 kHz 不稳，把 clock-frequency 降到 <100000> 即可。
+ */
+&i2c5 {
+	status = "okay";
+	i2c-scl-rising-time-ns = <160>;
+	i2c-scl-falling-time-ns = <30>;
+	clock-frequency = <400000>;
+};
+
+/*
  * CPU 温控曲线 —— 挂在 fan 上（fan 在上面 cooling-maps 里绑定）
  *
  * iStoreOS 的 active trips（插件 DEVELOPMENT.md 记录的内核默认曲线）：
